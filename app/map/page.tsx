@@ -21,33 +21,45 @@ function isValidLon(v: number): boolean {
 export default function Page() {
   const searchParams = useSearchParams();
 
-  // Inisialisasi awal ke waktu saat ini
   const [time, setTime] = useState<Date>(() => new Date());
-  
+  const [isMobile, setIsMobile] = useState(false);
+
   const rawLat = Number(searchParams.get("lat") ?? DEFAULT_LAT);
   const rawLon = Number(searchParams.get("lon") ?? DEFAULT_LON);
 
-  // ─── PERBAIKAN: Engine Waktu Natural (1 detik per detik) ───
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    checkMobile();
+
+    window.addEventListener("resize", checkMobile);
+
+    return () => {
+      window.removeEventListener("resize", checkMobile);
+    };
+  }, []);
+
   useEffect(() => {
     const id = setInterval(() => {
-      // Gunakan functional update: ambil waktu 'prev' dan tambahkan 1 detik (1000ms)
-      // Ini membuat waktu mengalir natural dari titik manapun yang dipilih user
       setTime((prevTime) => new Date(prevTime.getTime() + 1000));
     }, 1000);
-    
+
     return () => clearInterval(id);
   }, []);
-  // ──────────────────────────────────────────────────────────
 
   if (!isValidLat(rawLat) || !isValidLon(rawLon)) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-slate-950 font-mono">
+      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-slate-950 px-4 font-mono text-center">
         <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-red-400">
           Invalid Coordinates
         </div>
-        <div className="text-[10px] text-slate-600">
+
+        <div className="break-all text-[10px] text-slate-600">
           lat={String(rawLat)} · lon={String(rawLon)}
         </div>
+
         <div className="text-[9px] text-slate-700">
           Expected: lat ∈ [−90, 90] · lon ∈ [−180, 180]
         </div>
@@ -61,9 +73,40 @@ export default function Page() {
   return (
     <main className="relative h-screen w-full overflow-hidden bg-slate-950">
       <MapInterface lat={lat} lon={lon} time={time} />
-      <div className="absolute inset-0 z-20 pointer-events-none">
-        <MapHUD lat={lat} lon={lon} time={time} onTimeChange={setTime} />
-        <TimeScrubber time={time} onTimeChange={setTime} />
+
+      <div
+        className={`
+          absolute inset-0 z-20
+          ${isMobile ? "pointer-events-auto" : "pointer-events-none"}
+        `}
+      >
+        <div
+          className={`
+            h-full w-full
+            ${isMobile ? "flex flex-col justify-between" : ""}
+          `}
+        >
+          <div
+            className={`
+              ${isMobile ? "pointer-events-auto" : ""}
+            `}
+          >
+            <MapHUD lat={lat} lon={lon} time={time} onTimeChange={setTime} />
+          </div>
+
+          <div
+            className={`
+              w-full
+              ${
+                isMobile
+                  ? "pointer-events-auto px-2 pb-[max(env(safe-area-inset-bottom),12px)]"
+                  : ""
+              }
+            `}
+          >
+            <TimeScrubber time={time} onTimeChange={setTime} />
+          </div>
+        </div>
       </div>
     </main>
   );
