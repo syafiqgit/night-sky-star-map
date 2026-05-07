@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 
 import MapHUD from "@/components/map/map-hud";
@@ -13,6 +13,7 @@ const DEFAULT_LON = 106.82;
 function isValidLat(v: number): boolean {
   return Number.isFinite(v) && v >= -90 && v <= 90;
 }
+
 function isValidLon(v: number): boolean {
   return Number.isFinite(v) && v >= -180 && v <= 180;
 }
@@ -22,8 +23,21 @@ export default function Page() {
 
   // Inisialisasi awal ke waktu saat ini
   const [time, setTime] = useState<Date>(() => new Date());
+  
   const rawLat = Number(searchParams.get("lat") ?? DEFAULT_LAT);
   const rawLon = Number(searchParams.get("lon") ?? DEFAULT_LON);
+
+  // ─── PERBAIKAN: Engine Waktu Natural (1 detik per detik) ───
+  useEffect(() => {
+    const id = setInterval(() => {
+      // Gunakan functional update: ambil waktu 'prev' dan tambahkan 1 detik (1000ms)
+      // Ini membuat waktu mengalir natural dari titik manapun yang dipilih user
+      setTime((prevTime) => new Date(prevTime.getTime() + 1000));
+    }, 1000);
+    
+    return () => clearInterval(id);
+  }, []);
+  // ──────────────────────────────────────────────────────────
 
   if (!isValidLat(rawLat) || !isValidLon(rawLon)) {
     return (

@@ -1,0 +1,112 @@
+[
+  {
+    "id": 200001,
+    "name": "Andromeda Galaxy",
+    "messier": "M31",
+    "ra": 0.712,
+    "dec": 41.269,
+    "mag": 3.44,
+    "type": "Galaxy",
+    "color": "#a5b4fc",
+    "description": "Galaksi spiral terdekat dengan Bimasakti."
+  },
+  {
+    "id": 200002,
+    "name": "Orion Nebula",
+    "messier": "M42",
+    "ra": 5.588,
+    "dec": -5.391,
+    "mag": 4.0,
+    "type": "Nebula",
+    "color": "#fda4af",
+    "description": "Daerah pembentukan bintang paling terang di langit."
+  },
+  {
+    "id": 200003,
+    "name": "Pleiades",
+    "messier": "M45",
+    "ra": 3.783,
+    "dec": 24.116,
+    "mag": 1.6,
+    "type": "Cluster",
+    "color": "#93c5fd",
+    "description": "Gugus bintang terbuka 'Tujuh Bersaudara'."
+  },
+  {
+    "id": 200004,
+    "name": "Hercules Cluster",
+    "messier": "M13",
+    "ra": 16.695,
+    "dec": 36.46,
+    "mag": 5.8,
+    "type": "Cluster",
+    "color": "#e2e8f0",
+    "description": "Gugus bola raksasa di rasi bintang Hercules."
+  },
+  {
+    "id": 200005,
+    "name": "Lagoon Nebula",
+    "messier": "M8",
+    "ra": 18.051,
+    "dec": -24.38,
+    "mag": 6.0,
+    "type": "Nebula",
+    "color": "#f472b6",
+    "description": "Awan gas raksasa antar bintang di rasi Sagitarius."
+  },
+  {
+    "id": 200006,
+    "name": "Sombrero Galaxy",
+    "messier": "M104",
+    "ra": 12.666,
+    "dec": -11.621,
+    "mag": 8.0,
+    "type": "Galaxy",
+    "color": "#cbd5e1",
+    "description": "Galaksi spiral dengan inti yang sangat terang."
+  },
+  {
+    "id": 200007,
+    "name": "Whirlpool Galaxy",
+    "messier": "M51",
+    "ra": 13.498,
+    "dec": 47.195,
+    "mag": 8.4,
+    "type": "Galaxy",
+    "color": "#c4b5fd",
+    "description": "Galaksi spiral klasik yang sedang berinteraksi."
+  },
+  {
+    "id": 200008,
+    "name": "Eagle Nebula",
+    "messier": "M16",
+    "ra": 18.314,
+    "dec": -13.82,
+    "mag": 6.0,
+    "type": "Nebula",
+    "color": "#fb7185",
+    "description": "Lokasi pilar penciptaan (Pillars of Creation)."
+  },
+  {
+    "id": 200009,
+    "name": "Ring Nebula",
+    "messier": "M57",
+    "ra": 18.893,
+    "dec": 33.029,
+    "mag": 8.8,
+    "type": "Nebula",
+    "color": "#2dd4bf",
+    "description": "Nebula planeter yang berbentuk cincin sempurna."
+  },
+  {
+    "id": 200010,
+    "name": "Triangulum Galaxy",
+    "messier": "M33",
+    "ra": 1.564,
+    "dec": 30.66,
+    "mag": 5.72,
+    "type": "Galaxy",
+    "color": "#bfdbfe",
+    "description": "Anggota ketiga terbesar di Grup Lokal galaksi kita."
+  }
+]
