@@ -1,113 +1,230 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
-
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import StarCanvas from "@/components/map/star-canvas";
+import StarTooltip from "@/components/map/star-tooltip";
 import MapHUD from "@/components/map/map-hud";
-import MapInterface from "@/components/map/map-interface";
-import TimeScrubber from "@/components/map/time-scrubber";
+import { getSolarSystemObjects } from "@/lib/astro/ephemeris";
+import {
+  parseCoordinate,
+  isValidLatitude,
+  isValidLongitude,
+} from "@/lib/utils";
 
-const DEFAULT_LAT = -6.175;
-const DEFAULT_LON = 106.82;
-
-function isValidLat(v: number): boolean {
-  return Number.isFinite(v) && v >= -90 && v <= 90;
+interface Star {
+  id: number;
+  ra: number;
+  dec: number;
+  mag: number;
+  bv?: number;
+  name?: string | null;
+}
+interface DSO {
+  id: number;
+  name: string;
+  messier: string;
+  ra: number;
+  dec: number;
+  mag: number;
+  type: string;
+  color: string;
+}
+interface Constellation {
+  name: string;
+  lines: [number, number][];
+}
+export interface HoveredStar {
+  id: number;
+  name?: string | null;
+  mag: number;
+  bv?: number;
+  alt: number;
+  az: number;
+}
+interface MapFilters {
+  constellations: boolean;
+  faintStars: boolean;
+  planets: boolean;
+  atmosphere: boolean;
 }
 
-function isValidLon(v: number): boolean {
-  return Number.isFinite(v) && v >= -180 && v <= 180;
-}
+const DEFAULT_COORDS = { lat: -6.175, lon: 106.82 } as const;
+const CLOCK_INTERVAL_MS = 1000;
 
 export default function Page() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
-  const [time, setTime] = useState<Date>(() => new Date());
-  const [isMobile, setIsMobile] = useState(false);
+  const lat = parseCoordinate(searchParams.get("lat"), DEFAULT_COORDS.lat);
+  const lon = parseCoordinate(searchParams.get("lon"), DEFAULT_COORDS.lon);
 
-  const rawLat = Number(searchParams.get("lat") ?? DEFAULT_LAT);
-  const rawLon = Number(searchParams.get("lon") ?? DEFAULT_LON);
+  const initialQuery = searchParams.get("q") || "";
+  const initialFilters: MapFilters = {
+    constellations: searchParams.get("constellations") !== "false",
+    faintStars: searchParams.get("faintStars") !== "false",
+    planets: searchParams.get("planets") !== "false",
+    atmosphere: searchParams.get("atmosphere") !== "false",
+  };
+
+  const [stars, setStars] = useState<Star[]>([]);
+  const [dsos, setDsos] = useState<DSO[]>([]);
+  const [constellations, setConstellations] = useState<Constellation[]>([]);
+  const [solarSystem, setSolarSystem] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+
+  const [hoveredStar, setHoveredStar] = useState<HoveredStar | null>(null);
+  const [activeTarget, setActiveTarget] = useState<any | null>(null);
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [filters, setFilters] = useState<MapFilters>(initialFilters);
+  const [time, setTime] = useState(() => new Date());
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleStarHover = useCallback(
+    (star: HoveredStar | null) => setHoveredStar(star),
+    [],
+  );
+  const toggleFilter = useCallback(
+    (key: keyof MapFilters) =>
+      setFilters((prev) => ({ ...prev, [key]: !prev[key] })),
+    [],
+  );
+
+  const coordinates = useMemo(() => {
+    return { lat, lon, isValid: isValidLatitude(lat) && isValidLongitude(lon) };
+  }, [lat, lon]);
 
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
+    const intervalId = window.setInterval(
+      () => setTime((prev) => new Date(prev.getTime() + CLOCK_INTERVAL_MS)),
+      CLOCK_INTERVAL_MS,
+    );
+    return () => window.clearInterval(intervalId);
+  }, []);
 
-    checkMobile();
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
 
-    window.addEventListener("resize", checkMobile);
+    if (searchQuery) params.set("q", searchQuery);
+    else params.delete("q");
+
+    (Object.keys(filters) as Array<keyof MapFilters>).forEach((key) => {
+      if (!filters[key]) params.set(key, "false");
+      else params.delete(key);
+    });
+
+    const newUrl = `${pathname}?${params.toString()}`;
+    router.replace(newUrl, { scroll: false });
+  }, [searchQuery, filters, pathname, router]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        if (!stars.length) setLoading(true);
+
+        const queryParams = new URLSearchParams({
+          q: searchQuery,
+          constellations: filters.constellations.toString(),
+          planets: filters.planets.toString(),
+        });
+
+        const response = await fetch(
+          `/api/object-astronomies?${queryParams.toString()}`,
+          {
+            signal: controller.signal,
+          },
+        );
+
+        if (!response.ok) throw new Error("Gagal memuat katalog langit");
+
+        const data = await response.json();
+
+        setStars(data.stars);
+        setConstellations(data.constellations);
+        setDsos(data.dsos);
+        setSolarSystem(data.solarSystem);
+        setSearchResults(data.searchResults);
+
+        setError(null);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setError(
+          err instanceof Error ? err.message : "Terjadi kesalahan koneksi",
+        );
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
 
     return () => {
-      window.removeEventListener("resize", checkMobile);
+      clearTimeout(delayDebounceFn);
+      controller.abort();
     };
-  }, []);
+  }, [searchQuery, filters]);
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      setTime((prevTime) => new Date(prevTime.getTime() + 1000));
-    }, 1000);
-
-    return () => clearInterval(id);
-  }, []);
-
-  if (!isValidLat(rawLat) || !isValidLon(rawLon)) {
+  if (!coordinates.isValid) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-slate-950 px-4 font-mono text-center">
+      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-slate-950 px-4 text-center font-mono">
         <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-red-400">
           Invalid Coordinates
-        </div>
-
-        <div className="break-all text-[10px] text-slate-600">
-          lat={String(rawLat)} · lon={String(rawLon)}
-        </div>
-
-        <div className="text-[9px] text-slate-700">
-          Expected: lat ∈ [−90, 90] · lon ∈ [−180, 180]
         </div>
       </div>
     );
   }
 
-  const lat = rawLat;
-  const lon = rawLon;
+  if (loading) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-slate-950 font-mono text-xs text-sky-400/70">
+        SYNCING SERVER DATA...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-slate-950 font-mono text-xs text-red-400">
+        {error}
+      </div>
+    );
+  }
 
   return (
-    <main className="relative h-screen w-full overflow-hidden bg-slate-950">
-      <MapInterface lat={lat} lon={lon} time={time} />
-
-      <div
-        className={`
-          absolute inset-0 z-20
-          ${isMobile ? "pointer-events-auto" : "pointer-events-none"}
-        `}
-      >
-        <div
-          className={`
-            h-full w-full
-            ${isMobile ? "flex flex-col justify-between" : ""}
-          `}
-        >
-          <div
-            className={`
-              ${isMobile ? "pointer-events-auto" : ""}
-            `}
-          >
-            <MapHUD lat={lat} lon={lon} time={time} onTimeChange={setTime} />
-          </div>
-
-          <div
-            className={`
-              w-full
-              ${
-                isMobile
-                  ? "pointer-events-auto px-2 pb-[max(env(safe-area-inset-bottom),12px)]"
-                  : ""
-              }
-            `}
-          >
-            <TimeScrubber time={time} onTimeChange={setTime} />
-          </div>
-        </div>
-      </div>
+    <main className="relative h-full w-full overflow-hidden bg-black">
+      <StarCanvas
+        stars={stars}
+        constellations={constellations}
+        observer={{ lat, lon }}
+        time={time}
+        solarSystem={solarSystem}
+        onStarHover={handleStarHover}
+        filters={filters}
+        activeTarget={activeTarget}
+        onClearTarget={() => setActiveTarget(null)}
+        dsos={dsos}
+      />
+      <StarTooltip star={hoveredStar} />
+      <MapHUD
+        lat={lat}
+        lon={lon}
+        time={time}
+        filters={filters}
+        onToggleFilter={toggleFilter}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchResults={searchResults}
+        activeTarget={activeTarget}
+        onSelectTarget={(target) => {
+          setActiveTarget(target);
+          setSearchQuery("");
+        }}
+        onClearTarget={() => setActiveTarget(null)}
+        setTime={setTime}
+      />
     </main>
   );
 }

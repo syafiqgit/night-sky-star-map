@@ -1,327 +1,360 @@
+import { memo, useMemo } from "react";
+
 import type { HoveredStar } from "./star-canvas";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+interface StarTooltipProps {
+  star: HoveredStar | null;
+}
 
-function getSpectralClass(
-  bv: number | undefined
-): string {
-  if (bv === undefined) return "—";
+const CARDINAL_DIRECTIONS = [
+  "N",
+  "NNE",
+  "NE",
+  "ENE",
+  "E",
+  "ESE",
+  "SE",
+  "SSE",
+  "S",
+  "SSW",
+  "SW",
+  "WSW",
+  "W",
+  "WNW",
+  "NW",
+  "NNW",
+] as const;
 
-  if (bv < -0.3) return "O";
+function getSpectralClass(bv?: number): string {
+  if (bv === undefined) {
+    return "—";
+  }
 
-  if (bv < 0.0) return "B";
+  if (bv < -0.3) {
+    return "O";
+  }
 
-  if (bv < 0.3) return "A";
+  if (bv < 0.0) {
+    return "B";
+  }
 
-  if (bv < 0.6) return "F";
+  if (bv < 0.3) {
+    return "A";
+  }
 
-  if (bv < 0.8) return "G";
+  if (bv < 0.6) {
+    return "F";
+  }
 
-  if (bv < 1.4) return "K";
+  if (bv < 0.8) {
+    return "G";
+  }
+
+  if (bv < 1.4) {
+    return "K";
+  }
 
   return "M";
 }
 
-function getSpectralColor(
-  bv: number | undefined
-): string {
-  if (bv === undefined) return "#ffffff";
+function getSpectralColor(bv?: number): string {
+  if (bv === undefined) {
+    return "#ffffff";
+  }
 
-  if (bv < 0.0) return "#b8d0ff";
+  if (bv < 0.0) {
+    return "#b8d0ff";
+  }
 
-  if (bv < 0.5) return "#ffffff";
+  if (bv < 0.5) {
+    return "#ffffff";
+  }
 
-  if (bv < 1.0) return "#fff4ea";
+  if (bv < 1.0) {
+    return "#fff4ea";
+  }
 
-  if (bv < 1.5) return "#ffd2a1";
+  if (bv < 1.5) {
+    return "#ffd2a1";
+  }
 
   return "#ff9b9b";
 }
 
-function azToCardinal(az: number): string {
-  const dirs = [
-    "N",
-    "NNE",
-    "NE",
-    "ENE",
-    "E",
-    "ESE",
-    "SE",
-    "SSE",
-    "S",
-    "SSW",
-    "SW",
-    "WSW",
-    "W",
-    "WNW",
-    "NW",
-    "NNW",
-  ];
-
-  return dirs[Math.round(az / 22.5) % 16];
+function azimuthToCardinal(azimuth: number): string {
+  return CARDINAL_DIRECTIONS[Math.round(azimuth / 22.5) % 16];
 }
 
-function formatDeg(
-  value: number,
-  decimals = 2
-): string {
-  return `${
-    value >= 0 ? "+" : ""
-  }${value.toFixed(decimals)}°`;
+function formatDegree(value: number, decimals = 2): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(decimals)}°`;
 }
 
-// ─── Data Row ────────────────────────────────────────────────────────────────
-
-function DataRow({
+const InfoRow = memo(function InfoRow({
   label,
   value,
+  highlight = false,
 }: {
   label: string;
   value: React.ReactNode;
+  highlight?: boolean;
 }) {
   return (
-    <>
-      <dt
+    <div
+      className="
+        flex items-center
+        justify-between gap-4
+      "
+    >
+      <span
         className="
-          text-[9px] uppercase tracking-wider
+          text-[9px]
+          uppercase tracking-[0.18em]
           text-slate-500
+
           sm:text-[10px]
         "
       >
         {label}
-      </dt>
+      </span>
 
-      <dd
-        className="
-          text-right text-[10px]
-          tabular-nums text-slate-200
+      <span
+        className={`
+          text-right
+          text-[10px]
+          font-medium
+          tabular-nums
+
           sm:text-[11px]
-        "
+
+          ${highlight ? "text-amber-300" : "text-slate-100"}
+        `}
       >
         {value}
-      </dd>
-    </>
+      </span>
+    </div>
   );
-}
+});
 
-// ─── Component ────────────────────────────────────────────────────────────────
+export default function StarTooltip({ star }: StarTooltipProps) {
+  const computed = useMemo(() => {
+    if (!star) {
+      return null;
+    }
 
-export default function StarTooltip({
-  star,
-}: {
-  star: HoveredStar | null;
-}) {
-  if (!star) return null;
+    return {
+      spectralClass: getSpectralClass(star.bv),
 
-  const spectral = getSpectralClass(
-    star.bv
-  );
+      spectralColor: getSpectralColor(star.bv),
 
-  const spectralColor =
-    getSpectralColor(star.bv);
+      cardinal: azimuthToCardinal(star.az),
 
-  const cardinal = azToCardinal(star.az);
+      isNearHorizon: star.alt < 10,
 
-  const isNamedStar = Boolean(star.name);
+      isLowAltitude: star.alt < 15,
+
+      displayName: star.name || `Star #${star.id}`,
+    };
+  }, [star]);
+
+  if (!star || !computed) {
+    return null;
+  }
 
   return (
     <div
-      aria-live="polite"
       role="status"
+      aria-live="polite"
       className="
         pointer-events-none
-        absolute z-50
-        left-1/2
-        bottom-24
+        absolute left-1/2
+        bottom-24 z-50
         w-full
         -translate-x-1/2
         px-3
+
         sm:bottom-8
-        sm:px-0
       "
     >
       <div
         className="
           mx-auto
           w-full
-          max-w-[320px]
+          max-w-85
           overflow-hidden
-          rounded-2xl
-          border border-white/[0.07]
-          bg-slate-950/80
+          rounded-3xl
+          border border-white/10
+          bg-black/55
           font-mono
-          backdrop-blur-xl
-          shadow-[0_8px_48px_rgba(0,0,0,0.6),0_0_0_1px_rgba(96,165,250,0.08)]
+          backdrop-blur-2xl
 
-          sm:w-68
+          shadow-[0_12px_60px_rgba(0,0,0,0.55)]
+
+          supports-backdrop-filter:bg-black/40
         "
       >
-        {/* Accent */}
-        <div className="h-px bg-linear-to-r from-transparent via-blue-500/40 to-transparent" />
+        <div
+          className="
+            h-px
+            bg-linear-to-r
+            from-transparent
+            via-sky-400/40
+            to-transparent
+          "
+        />
 
-        <div className="p-3 sm:p-4">
-          {/* Header */}
-          <div className="mb-3 flex items-center justify-between">
-            <span
-              className="
-                text-[8px]
-                font-bold uppercase
-                tracking-[0.24em]
-                text-blue-400/70
-
-                sm:text-[9px]
-                sm:tracking-[0.28em]
-              "
-            >
-              Object Identified
-            </span>
-
-            <span className="animate-pulse text-[9px] text-blue-500">
-              ◉
-            </span>
-          </div>
-
-          {/* Title */}
-          <div className="mb-3 border-b border-white/6 pb-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <h3
-                  className="
-                    truncate
-                    text-[14px]
-                    font-bold
-                    leading-tight
-                    text-white
-
-                    sm:text-[15px]
-                  "
-                >
-                  {isNamedStar
-                    ? star.name
-                    : `Star #${star.id}`}
-                </h3>
-
-                {isNamedStar && (
-                  <p
-                    className="
-                      mt-0.5
-                      text-[8px]
-                      text-slate-600
-                      sm:text-[9px]
-                    "
-                  >
-                    HYG #{star.id}
-                  </p>
-                )}
-              </div>
-
-              {/* Spectral */}
+        <div className="p-4">
+          <div
+            className="
+              flex items-center
+              justify-between gap-3
+            "
+          >
+            <div>
               <div
-                title={`Spectral class ${spectral}`}
                 className="
-                  mt-0.5
-                  flex
-                  h-5
-                  w-5
-                  shrink-0
-                  items-center
-                  justify-center
-                  rounded-full
                   text-[8px]
-                  font-bold
+                  font-semibold
+                  uppercase
+                  tracking-[0.26em]
+                  text-sky-300/80
 
                   sm:text-[9px]
                 "
-                style={{
-                  backgroundColor: `${spectralColor}18`,
-                  border: `1px solid ${spectralColor}40`,
-                  color: spectralColor,
-                }}
               >
-                {spectral}
+                Celestial Object
               </div>
+
+              <h3
+                className="
+                  mt-2
+                  truncate
+                  text-[15px]
+                  font-bold
+                  tracking-tight
+                  text-white
+
+                  sm:text-[16px]
+                "
+              >
+                {computed.displayName}
+              </h3>
+
+              {star.name && (
+                <p
+                  className="
+                    mt-1
+                    text-[9px]
+                    text-slate-500
+                  "
+                >
+                  HYG #{star.id}
+                </p>
+              )}
+            </div>
+
+            <div
+              className="
+                flex h-9 w-9
+                shrink-0
+                items-center
+                justify-center
+                rounded-2xl
+                border text-[10px]
+                font-bold
+              "
+              style={{
+                color: computed.spectralColor,
+
+                borderColor: `${computed.spectralColor}35`,
+
+                backgroundColor: `${computed.spectralColor}15`,
+              }}
+            >
+              {computed.spectralClass}
             </div>
           </div>
 
-          {/* Data */}
-          <dl
+          <div
             className="
-              grid grid-cols-2
-              items-baseline
-              gap-x-3 gap-y-2
-
-              sm:gap-x-4
+              my-4
+              h-px
+              bg-white/5
             "
-          >
-            <DataRow
-              label="Magnitude"
-              value={star.mag.toFixed(2)}
-            />
+          />
 
-            <DataRow
+          <div className="space-y-3">
+            <InfoRow label="Magnitude" value={star.mag.toFixed(2)} />
+
+            <InfoRow
               label="Altitude"
-              value={
-                <span
-                  className={
-                    star.alt < 15
-                      ? "text-amber-400/80"
-                      : undefined
-                  }
-                >
-                  {formatDeg(star.alt)}
-                </span>
-              }
+              value={formatDegree(star.alt)}
+              highlight={computed.isLowAltitude}
             />
 
-            <DataRow
+            <InfoRow
               label="Azimuth"
-              value={`${star.az.toFixed(
-                1
-              )}° ${cardinal}`}
+              value={`${star.az.toFixed(1)}° ${computed.cardinal}`}
             />
 
             {star.bv !== undefined && (
-              <DataRow
+              <InfoRow
                 label="B−V Index"
-                value={formatDeg(
-                  star.bv,
-                  2
-                ).replace("+", "")}
+                value={formatDegree(star.bv, 2).replace("+", "")}
               />
             )}
-          </dl>
+          </div>
 
-          {/* Warning */}
-          {star.alt < 10 && (
+          {computed.isNearHorizon && (
             <div
               className="
-                mt-3
-                flex items-start gap-1.5
-                rounded-lg
-                border border-amber-500/20
+                mt-4
+                rounded-2xl
+                border border-amber-500/15
                 bg-amber-500/10
-                px-2.5 py-2
-
-                sm:items-center
-                sm:py-1.5
+                px-3 py-2.5
               "
             >
-              <span className="text-[8px] text-amber-400/80">
-                ⚠
-              </span>
-
-              <span
+              <div
                 className="
-                  text-[8px]
-                  leading-relaxed
-                  text-amber-400/70
-
-                  sm:text-[9px]
+                  flex items-start gap-2
                 "
               >
-                Near horizon — atmospheric
-                refraction may apply
-              </span>
+                <span
+                  className="
+                    mt-px
+                    text-[10px]
+                    text-amber-300
+                  "
+                >
+                  ⚠
+                </span>
+
+                <div>
+                  <div
+                    className="
+                      text-[9px]
+                      font-medium
+                      uppercase
+                      tracking-[0.16em]
+                      text-amber-300
+                    "
+                  >
+                    Low Horizon Visibility
+                  </div>
+
+                  <p
+                    className="
+                      mt-1
+                      text-[9px]
+                      leading-relaxed
+                      text-amber-200/70
+                    "
+                  >
+                    Atmospheric refraction may affect apparent position and
+                    brightness.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </div>
