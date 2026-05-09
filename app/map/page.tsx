@@ -3,9 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import StarCanvas from "@/components/map/star-canvas";
-import StarTooltip from "@/components/map/star-tooltip";
 import MapHUD from "@/components/map/map-hud";
-import { getSolarSystemObjects } from "@/lib/astro/ephemeris";
 import {
   parseCoordinate,
   isValidLatitude,
@@ -47,6 +45,8 @@ interface MapFilters {
   faintStars: boolean;
   planets: boolean;
   atmosphere: boolean;
+  gridHorizontal?: boolean; // Penambahan fitur toggle grid Alt/Az
+  gridEquatorial?: boolean;
 }
 
 const DEFAULT_COORDS = { lat: -6.175, lon: 106.82 } as const;
@@ -66,6 +66,8 @@ export default function Page() {
     faintStars: searchParams.get("faintStars") !== "false",
     planets: searchParams.get("planets") !== "false",
     atmosphere: searchParams.get("atmosphere") !== "false",
+    gridHorizontal: searchParams.get("gridHorizontal") !== "false", 
+    gridEquatorial: searchParams.get("gridEquatorial") !== "false",
   };
 
   const [stars, setStars] = useState<Star[]>([]);
@@ -207,7 +209,6 @@ export default function Page() {
         onClearTarget={() => setActiveTarget(null)}
         dsos={dsos}
       />
-      <StarTooltip star={hoveredStar} />
       <MapHUD
         lat={lat}
         lon={lon}
@@ -224,6 +225,8 @@ export default function Page() {
         }}
         onClearTarget={() => setActiveTarget(null)}
         setTime={setTime}
+        hoveredStar={hoveredStar}
+        onCloseStarTooltip={() => setHoveredStar(null)}
       />
     </main>
   );

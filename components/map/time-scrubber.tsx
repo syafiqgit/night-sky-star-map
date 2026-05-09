@@ -164,14 +164,9 @@ export default function TimeScrubber({
   return (
     <div
       className="
-        absolute
-        left-1/2
         z-50
         w-full
-        -translate-x-1/2
         px-3
-        bottom-[max(env(safe-area-inset-bottom),12px)]
-
         sm:bottom-8
         sm:max-w-3xl
         sm:px-4

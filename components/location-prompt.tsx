@@ -30,12 +30,13 @@ export default function LocationPrompt() {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         navigateTo(position.coords.latitude, position.coords.longitude);
-        // No setLoading(false) needed — navigation will unmount
       },
       () => {
-        setError("Unable to retrieve location. Please enter coordinates manually.");
+        setError(
+          "Unable to retrieve location. Please enter coordinates manually.",
+        );
         setLoading(false);
-      }
+      },
     );
   };
 
@@ -69,8 +70,6 @@ export default function LocationPrompt() {
   return (
     <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl shadow-2xl">
       <div className="flex flex-col gap-6">
-
-        {/* Header */}
         <div className="space-y-2">
           <h2 className="text-xl font-semibold text-white flex items-center gap-2">
             <MapPin size={20} className="text-blue-400" />
@@ -80,8 +79,6 @@ export default function LocationPrompt() {
             We need your coordinates to align the celestial sphere.
           </p>
         </div>
-
-        {/* GPS Button */}
         <button
           onClick={handleGetLocation}
           disabled={loading}
@@ -103,16 +100,12 @@ export default function LocationPrompt() {
             </>
           )}
         </button>
-
-        {/* Divider */}
         <div className="relative flex items-center justify-center">
           <hr className="w-full border-slate-800" />
           <span className="absolute bg-[#020617] px-3 text-xs text-slate-500 uppercase tracking-widest font-bold">
             Or
           </span>
         </div>
-
-        {/* Manual coordinate input */}
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -150,7 +143,6 @@ export default function LocationPrompt() {
               />
             </div>
           </div>
-
           <button
             onClick={handleManualSubmit}
             disabled={!canSubmitManual}
@@ -160,18 +152,11 @@ export default function LocationPrompt() {
             Use These Coordinates
           </button>
         </div>
-
-        {/* Error message */}
         {error && (
-          <p
-            role="alert"
-            className="text-red-400 text-xs text-center"
-          >
+          <p role="alert" className="text-red-400 text-xs text-center">
             {error}
           </p>
         )}
-
-        {/* Default location shortcut */}
         <button
           onClick={handleDefault}
           className="flex items-center justify-between w-full px-6 py-4 rounded-2xl border border-white/5 bg-white/5 hover:bg-white/10 text-white transition-all group"
@@ -184,7 +169,6 @@ export default function LocationPrompt() {
             className="group-hover:translate-x-1 transition-transform text-slate-500"
           />
         </button>
-
       </div>
     </div>
   );
