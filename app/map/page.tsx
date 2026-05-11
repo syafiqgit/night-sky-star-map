@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react"; // Tambahkan Suspense
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import StarCanvas from "@/components/map/star-canvas";
 import MapHUD from "@/components/map/map-hud";
@@ -10,6 +10,7 @@ import {
   isValidLongitude,
 } from "@/lib/utils";
 
+// --- Interfaces (Tetap sama) ---
 interface Star {
   id: number;
   ra: number;
@@ -54,9 +55,10 @@ interface MapFilters {
 
 const DEFAULT_COORDS = { lat: -6.175, lon: 106.82 } as const;
 const CLOCK_INTERVAL_MS = 1000;
-const DEFAULT_ZOOM = 0.100; // Menggunakan nilai zoom awal pilihan Anda
+const DEFAULT_ZOOM = 0.1;
 
-export default function Page() {
+// 1. Pindahkan seluruh logika ke komponen internal ini
+function MapContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -102,10 +104,9 @@ export default function Page() {
     [],
   );
 
-  // 1. Gabungkan logika seleksi target agar konsisten (Kanvas & HUD)
   const handleSelectTarget = useCallback((target: any) => {
     setActiveTarget(target);
-    if (target) setSearchQuery(""); // Bersihkan search query jika objek dipilih
+    if (target) setSearchQuery("");
   }, []);
 
   const handleClearTarget = useCallback(() => {
@@ -185,7 +186,7 @@ export default function Page() {
       clearTimeout(delayDebounceFn);
       controller.abort();
     };
-  }, [searchQuery, filters]);
+  }, [searchQuery, filters, stars.length]);
 
   if (!coordinates.isValid) {
     return (
@@ -225,7 +226,7 @@ export default function Page() {
         onStarHover={handleStarHover}
         filters={filters}
         activeTarget={activeTarget}
-        onSelectTarget={handleSelectTarget} // SEKARANG KANVAS BISA MERUBAH TARGET
+        onSelectTarget={handleSelectTarget}
         onClearTarget={handleClearTarget}
         dsos={dsos}
         zoomLevel={zoomLevel}
@@ -241,7 +242,7 @@ export default function Page() {
         onSearchChange={setSearchQuery}
         searchResults={searchResults}
         activeTarget={activeTarget}
-        onSelectTarget={handleSelectTarget} // MENGGUNAKAN LOGIKA YANG SAMA
+        onSelectTarget={handleSelectTarget}
         onClearTarget={handleClearTarget}
         setTime={setTime}
         hoveredStar={hoveredStar}
@@ -250,5 +251,19 @@ export default function Page() {
         onResetView={handleResetView}
       />
     </main>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen flex-col items-center justify-center bg-slate-950 font-mono text-xs text-sky-400/70">
+          INITIALIZING SYSTEM...
+        </div>
+      }
+    >
+      <MapContent />
+    </Suspense>
   );
 }
