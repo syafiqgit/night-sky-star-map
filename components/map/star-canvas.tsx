@@ -292,17 +292,19 @@ function buildSatelliteLayout(
     const slot = index % slotCount;
     const spread = (slot / slotCount) * Math.PI * 2;
     const angle = baseAngle + spread + ring * 0.28;
+
+    // --- PERUBAHAN: Jarak diperlebar dari 16 menjadi 45, ring dari 18 menjadi 35 ---
     const distance =
-      parentRadius + 16 * zoomScale + ring * (18 * zoomScale) + slot * 1.25;
+      parentRadius + 45 * zoomScale + ring * (35 * zoomScale) + slot * 1.25;
+
     const x = parent.x + Math.cos(angle) * distance;
     const y = parent.y + Math.sin(angle) * distance;
-    const labelDistance = distance + (isMobile ? 14 : 18) * zoomScale + 6;
 
     layouts.set(child.id, {
       x,
       y,
-      labelX: parent.x + Math.cos(angle) * labelDistance,
-      labelY: parent.y + Math.sin(angle) * labelDistance,
+      labelX: 0, // Tidak digunakan lagi
+      labelY: 0, // Tidak digunakan lagi
       leaderX1: parent.x,
       leaderY1: parent.y,
       leaderX2: x,
@@ -329,6 +331,7 @@ export default function StarCanvas({
   onZoomChange,
 }: StarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
   const renderedStarsRef = useRef<Map<number, ProjectedStar>>(new Map());
 
   const renderedConstellationsRef = useRef<
@@ -381,23 +384,29 @@ export default function StarCanvas({
   const zoomLevelRef = useRef<number>(currentZoomLevel);
   zoomLevelRef.current = currentZoomLevel;
 
+  const onZoomChangeRef = useRef(onZoomChange);
   useEffect(() => {
-    setInternalZoomLevel(clamp(externalZoomLevel, MIN_ZOOM_LEVEL, 15.0));
-  }, [externalZoomLevel]);
+    onZoomChangeRef.current = onZoomChange;
+  }, [onZoomChange]);
 
-  const updateZoomLevel = useCallback(
-    (updater: (prev: number) => number) => {
-      const nextZoom = updater(zoomLevelRef.current);
-      const clampedZoom = clamp(nextZoom, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
+  useEffect(() => {
+    const clamped = clamp(externalZoomLevel, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
+    // Hanya update jika perubahannya signifikan untuk memutus loop
+    if (Math.abs(clamped - internalZoomLevel) > 0.000001) {
+      setInternalZoomLevel(clamped);
+    }
+  }, [externalZoomLevel, internalZoomLevel]);
 
-      if (onZoomChange) {
-        onZoomChange(clampedZoom);
-      } else {
-        setInternalZoomLevel(clampedZoom);
-      }
-    },
-    [onZoomChange],
-  );
+  const updateZoomLevel = useCallback((updater: (prev: number) => number) => {
+    const nextZoom = updater(zoomLevelRef.current);
+    const clampedZoom = clamp(nextZoom, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
+
+    if (onZoomChangeRef.current) {
+      onZoomChangeRef.current(clampedZoom);
+    } else {
+      setInternalZoomLevel(clampedZoom);
+    }
+  }, []); // Dependency kosongependency kosong karena menggunakan Ref
 
   const prevTargetRef = useRef<any>(null);
   const isAutoZoomingOutRef = useRef(false);
@@ -766,7 +775,7 @@ export default function StarCanvas({
       isActive = false;
       if (frameId) cancelAnimationFrame(frameId);
     };
-  }, [activeTarget, updateZoomLevel, projectedConstellations]);
+  }, [activeTarget, updateZoomLevel]);
 
   const selectObjectAtPoint = useCallback(
     (clientX: number, clientY: number) => {
@@ -1560,33 +1569,18 @@ export default function StarCanvas({
         context.shadowBlur = 0;
 
         // Label Nama (Hanya muncul jika zoom cukup atau sedang di-track)
-        if (isSatellite || currentZoomLevel > 3.0) {
-          const labelX = satelliteLayout?.labelX ?? renderX;
-          const labelY =
-            satelliteLayout?.labelY ?? renderY + drawRadius + 10 * uiScale;
+        if (!isSatellite && (currentZoomLevel > 3.0 || star.id === 0)) {
+          // Hanya gambar label jika BUKAN satelit
+          const labelX = renderX;
+          const labelY = renderY + drawRadius + 12 * uiScale;
 
           context.save();
-          context.font = `${8 * uiScale}px monospace`;
+          context.font = `${10 * uiScale}px monospace`;
           context.textAlign = "center";
-
-          const label = star.name || "";
-          const metrics = context.measureText(label);
-          const bgW = metrics.width + 8 * uiScale;
-          const bgH = 12 * uiScale;
-
-          context.fillStyle = "rgba(2, 6, 23, 0.6)";
-          context.beginPath();
-          context.roundRect(
-            labelX - bgW / 2,
-            labelY - bgH / 2,
-            bgW,
-            bgH,
-            4 * uiScale,
-          );
-          context.fill();
-
           context.fillStyle = "white";
-          context.fillText(label, labelX, labelY + 3 * uiScale);
+          context.shadowBlur = 4;
+          context.shadowColor = "black";
+          context.fillText(star.name || "", labelX, labelY);
           context.restore();
         }
       }

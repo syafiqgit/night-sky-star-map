@@ -40,4 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-/public/data/constellations-linse.json
+# raw data
+/public/data/constellations-lines.json
+/public/data/constellations-names.json
+/public/data/hyg.csv

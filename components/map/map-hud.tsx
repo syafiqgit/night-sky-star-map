@@ -170,15 +170,24 @@ export default function MapHUD({
   }, [mounted, time]);
 
   const fovDegrees = useMemo(() => {
+    const MAX_FOV_DEG = 185;
+    const MIN_FOV_DEG = 0.000278; // Batas minimal sesuai Stellarium
+
+    // Rumus FOV dari StarCanvas: (2.5 / zoomLevel) * (180 / PI)
     const calculatedFov = (2.5 / zoomLevel) * (180 / Math.PI);
-    return Math.min(185, calculatedFov);
+
+    // Clamp agar angka tidak melewati batas limit baru
+    return Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, calculatedFov));
   }, [zoomLevel]);
 
   const fovPercentage = useMemo(() => {
-    const minFov = 15;
+    const minFov = 0.000278;
     const maxFov = 185;
     const clamped = Math.max(minFov, Math.min(maxFov, fovDegrees));
-    return ((clamped - minFov) / (maxFov - minFov)) * 100;
+
+    // Menghitung persentase bar:
+    // 0% saat pandangan lebar (185°), 100% saat zoom maksimal (0.000278°)
+    return ((maxFov - clamped) / (maxFov - minFov)) * 100;
   }, [fovDegrees]);
 
   return (
@@ -449,7 +458,11 @@ export default function MapHUD({
               <div className="flex flex-col items-end">
                 <div className="flex items-baseline gap-1">
                   <span className="text-[10px] font-bold tabular-nums text-slate-200">
-                    {fovDegrees.toFixed(1)}°
+                    {/* Menggunakan 4 desimal agar presisi Stellarium terlihat */}
+                    {fovDegrees < 1
+                      ? fovDegrees.toFixed(6)
+                      : fovDegrees.toFixed(2)}
+                    °
                   </span>
                   <span className="text-[7px] font-medium uppercase tracking-widest text-slate-500">
                     FOV

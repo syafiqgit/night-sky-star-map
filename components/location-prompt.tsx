@@ -2,9 +2,23 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Navigation, ArrowRight, Loader2 } from "lucide-react";
+import { MapPin, Navigation, ArrowRight, Loader2, Globe } from "lucide-react";
 
 const DEFAULT_LOCATION = { lat: -6.2088, lon: 106.8456, label: "Jakarta" };
+
+// Daftar 10 kota terkenal
+const FAMOUS_CITIES = [
+  { label: "Tokyo", lat: 35.6895, lon: 139.6917 },
+  { label: "London", lat: 51.5074, lon: -0.1278 },
+  { label: "New York", lat: 40.7128, lon: -74.006 },
+  { label: "Paris", lat: 48.8566, lon: 2.3522 },
+  { label: "Sydney", lat: -33.8688, lon: 151.2093 },
+  { label: "Dubai", lat: 25.2048, lon: 55.2708 },
+  { label: "Singapore", lat: 1.3521, lon: 103.8198 },
+  { label: "Rio", lat: -22.9068, lon: -43.1729 },
+  { label: "Cairo", lat: 30.0444, lon: 31.2357 },
+  { label: "Los Angeles", lat: 34.0522, lon: -118.2437 },
+];
 
 export default function LocationPrompt() {
   const router = useRouter();
@@ -68,7 +82,7 @@ export default function LocationPrompt() {
   const canSubmitManual = lat.trim() !== "" && lon.trim() !== "";
 
   return (
-    <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl shadow-2xl">
+    <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl shadow-2xl overflow-hidden">
       <div className="flex flex-col gap-6">
         <div className="space-y-2">
           <h2 className="text-xl font-semibold text-white flex items-center gap-2">
@@ -79,11 +93,11 @@ export default function LocationPrompt() {
             We need your coordinates to align the celestial sphere.
           </p>
         </div>
+
         <button
           onClick={handleGetLocation}
           disabled={loading}
           className="group relative flex items-center justify-center gap-2 w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:cursor-not-allowed text-white font-semibold rounded-2xl transition-all duration-200"
-          aria-label="Use current GPS location"
         >
           {loading ? (
             <>
@@ -100,23 +114,42 @@ export default function LocationPrompt() {
             </>
           )}
         </button>
-        <div className="relative flex items-center justify-center">
+
+        {/* --- SECTION KOTA TERKENAL --- */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 px-1">
+            <Globe size={14} className="text-slate-500" />
+            <span className="text-[10px] uppercase tracking-widest font-bold text-slate-500">
+              Quick Select
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {FAMOUS_CITIES.map((city) => (
+              <button
+                key={city.label}
+                onClick={() => navigateTo(city.lat, city.lon)}
+                className="text-left px-4 py-2 rounded-xl bg-white/5 border border-white/5 hover:border-blue-500/30 hover:bg-blue-500/10 text-slate-300 hover:text-blue-300 text-xs transition-all duration-200"
+              >
+                {city.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative flex items-center justify-center py-2">
           <hr className="w-full border-slate-800" />
-          <span className="absolute bg-[#020617] px-3 text-xs text-slate-500 uppercase tracking-widest font-bold">
-            Or
+          <span className="absolute bg-[#0b101b] px-3 text-[10px] text-slate-600 uppercase tracking-widest font-bold">
+            Manual Input
           </span>
         </div>
+
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label
-                htmlFor="lat-input"
-                className="text-[10px] uppercase tracking-wider font-bold text-slate-500 ml-1"
-              >
+              <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 ml-1">
                 Latitude
               </label>
               <input
-                id="lat-input"
                 type="text"
                 inputMode="decimal"
                 placeholder="e.g. -6.175"
@@ -126,14 +159,10 @@ export default function LocationPrompt() {
               />
             </div>
             <div className="space-y-2">
-              <label
-                htmlFor="lon-input"
-                className="text-[10px] uppercase tracking-wider font-bold text-slate-500 ml-1"
-              >
+              <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 ml-1">
                 Longitude
               </label>
               <input
-                id="lon-input"
                 type="text"
                 inputMode="decimal"
                 placeholder="e.g. 106.82"
@@ -152,11 +181,13 @@ export default function LocationPrompt() {
             Use These Coordinates
           </button>
         </div>
+
         {error && (
           <p role="alert" className="text-red-400 text-xs text-center">
             {error}
           </p>
         )}
+
         <button
           onClick={handleDefault}
           className="flex items-center justify-between w-full px-6 py-4 rounded-2xl border border-white/5 bg-white/5 hover:bg-white/10 text-white transition-all group"
