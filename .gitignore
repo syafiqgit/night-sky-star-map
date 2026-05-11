@@ -39,8 +39,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
-# raw data
-public/data/constellations-lines.json
-public/data/constellations-names.json
-public/data/hyg.csv
+/public/data/constellations-lines.json
+/public/data/constellations-names.json
