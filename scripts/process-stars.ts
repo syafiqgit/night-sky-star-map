@@ -1,71 +1,107 @@
-import fs from 'fs';
-import path from 'path';
-import csv from 'csv-parser';
+import fs from "fs";
+import path from "path";
+import csv from "csv-parser";
+import { fileURLToPath } from "url";
 
 /**
- * CONFIGURATION
- * MAGNITUDE_LIMIT: 6.5 (Batas visibilitas mata telanjang di lokasi gelap sempurna).
- * Semakin kecil angka ini, semakin sedikit bintang yang diproses (performa meningkat).
+ * KONFIGURASI
+ * MAGNITUDE_LIMIT 6.5 adalah batas standar visibilitas mata telanjang di langit yang sangat gelap.
  */
-const MAGNITUDE_LIMIT = 6.5;
-const INPUT_FILE = '../public/data/hyg.csv';
-const OUTPUT_FILE = '../public/data/stars.json';
 
-// Pastikan folder output ada
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const MAGNITUDE_LIMIT = 6.5;
+const INPUT_FILE = path.join(__dirname, "../public/data/hyg.csv");
+const OUTPUT_FILE = path.join(__dirname, "../public/data/stars.json");
+
+// Pastikan direktori output tersedia
 const outputDir = path.dirname(OUTPUT_FILE);
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
+// Struktur data yang dioptimasi untuk Frontend
 interface Star {
   id: number;
-  ra: number;
-  dec: number;
-  mag: number;
-  name: string | null;
+  ra: number; // Right Ascension dalam derajat (0-360)
+  dec: number; // Declination dalam derajat
+  mag: number; // Apparent Magnitude
+  name: string | null; // Proper name (e.g., Sirius)
+  sciName: string | null; // Bayer/Flamsteed (e.g., Alp CMa)
+  bv: number | null; // Color Index (untuk suhu & warna)
+  dist: number | null; // Distance dalam Light Years
+  con: string | null; // Constellation abbreviation
 }
 
 const stars: Star[] = [];
 let processedCount = 0;
 
-console.log('--- Star Database Preprocessing Start ---');
+console.log("--- Memulai Preprocessing Database Bintang ---");
 
 fs.createReadStream(INPUT_FILE)
   .pipe(csv())
-  .on('data', (row) => {
+  .on("data", (row) => {
     processedCount++;
     const mag = parseFloat(row.mag);
 
-    // Filter berdasarkan magnitudo
+    // Filter berdasarkan batas kecerahan agar file JSON tidak terlalu berat
     if (mag <= MAGNITUDE_LIMIT) {
+      /**
+       * OPTIMASI 1: Konversi RA
+       * Di database asli, RA dalam format jam (0-24).
+       * Kita konversi ke derajat (0-360) dengan mengalikan 15 agar frontend lebih ringan.
+       */
+      const raDegrees = parseFloat(row.ra) * 15;
+
+      /**
+       * OPTIMASI 2: Konversi Jarak
+       * Database asli menggunakan Parsecs. Kita konversi ke Tahun Cahaya (LY).
+       * 1 Parsec = ~3.26156 Light Years.
+       */
+      const distanceLY = row.dist
+        ? parseFloat((parseFloat(row.dist) * 3.26156).toFixed(2))
+        : null;
+
       stars.push({
         id: parseInt(row.id),
-        ra: parseFloat(row.ra),   // Unit: Jam (0-24)
-        dec: parseFloat(row.dec), // Unit: Derajat (-90 to 90)
+        ra: parseFloat(raDegrees.toFixed(4)),
+        dec: parseFloat(parseFloat(row.dec).toFixed(6)),
         mag: mag,
-        name: row.proper || null  // Nama populer (misal: Sirius, Betelgeuse)
+        name: row.proper || null,
+        sciName: row.bf || null,
+        bv: row.ci ? parseFloat(row.ci) : null,
+        dist: distanceLY,
+        con: row.con || null,
       });
     }
 
     if (processedCount % 20000 === 0) {
-      console.log(`Scanning... ${processedCount} rows checked.`);
+      console.log(`Memproses... ${processedCount} baris diperiksa.`);
     }
   })
-  .on('end', () => {
+  .on("end", () => {
     try {
-      // Menggunakan JSON.stringify tanpa spasi (minified) untuk menghemat ukuran file
+      // Urutkan berdasarkan magnitudo (paling terang duluan)
+      // Ini berguna agar jika kita ingin membatasi render, kita merender bintang paling terang dulu.
+      stars.sort((a, b) => a.mag - b.mag);
+
       fs.writeFileSync(OUTPUT_FILE, JSON.stringify(stars));
-      
-      const fileSizeKiloBytes = (fs.statSync(OUTPUT_FILE).size / 1024).toFixed(2);
-      
-      console.log('--- Success ---');
-      console.log(`Total rows checked: ${processedCount}`);
-      console.log(`Stars extracted: ${stars.length}`);
-      console.log(`Output file: ${OUTPUT_FILE} (${fileSizeKiloBytes} KB)`);
+
+      const fileSizeMB = (
+        fs.statSync(OUTPUT_FILE).size /
+        (1024 * 1024)
+      ).toFixed(2);
+
+      console.log("\n--- Ekstraksi Selesai ---");
+      console.log(`Total baris diperiksa : ${processedCount}`);
+      console.log(`Bintang diekstrak     : ${stars.length}`);
+      console.log(`Ukuran file akhir     : ${fileSizeMB} MB`);
+      console.log(`Lokasi file           : ${OUTPUT_FILE}`);
     } catch (err) {
-      console.error('Critical error writing file:', err);
+      console.error("Gagal menulis file JSON:", err);
     }
   })
-  .on('error', (err) => {
-    console.error('Error reading CSV:', err);
+  .on("error", (err) => {
+    console.error("Gagal membaca file CSV:", err);
   });

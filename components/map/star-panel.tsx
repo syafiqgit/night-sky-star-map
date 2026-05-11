@@ -1,23 +1,24 @@
 import { memo, useMemo } from "react";
 import { Crosshair, X } from "lucide-react";
 
-// Perluas tipe bawaan agar mendukung properti DSO yang masuk saat di-hover
+// 1. PERBAIKAN INTERFACE: Tambahkan properti DSO yang hilang (messier, color, description)
 export interface HoveredSkyObject {
-  id: number;
+  id: number | string;
   name?: string | null;
-  mag: number;
+  mag?: number; // Diubah menjadi opsional karena rasi bintang tidak memiliki magnitudo
+  bv?: number;
   alt: number;
   az: number;
-  bv?: number;
-  messier?: string;
   type?: string;
+  messier?: string;
   color?: string;
   description?: string;
 }
 
+// 2. PERBAIKAN PROPS: Sesuaikan tipe activeTarget.id menjadi 'number | string'
 interface StarTooltipProps {
   star: HoveredSkyObject | null;
-  activeTarget: { id: number } | null;
+  activeTarget: { id: number | string } | null;
   onTrackStar: (star: HoveredSkyObject) => void;
   onClearTarget: () => void;
   onClose: () => void;
@@ -70,15 +71,17 @@ function getIndicatorColor(obj: HoveredSkyObject, isPlanet: boolean): string {
 }
 
 function azimuthToCardinal(azimuth: number): string {
-  return CARDINAL_DIRECTIONS[Math.round(azimuth / 22.5) % 16];
+  return CARDINAL_DIRECTIONS[Math.round((azimuth || 0) / 22.5) % 16];
 }
 
 function formatDegree(value: number, decimals = 2): string {
-  return `${value >= 0 ? "+" : ""}${value.toFixed(decimals)}°`;
+  const safeVal = typeof value === "number" ? value : 0;
+  return `${safeVal >= 0 ? "+" : ""}${safeVal.toFixed(decimals)}°`;
 }
 
 // Penilai Visibilitas berdasarkan Magnitudo
-function getVisibilityRating(mag: number): string {
+function getVisibilityRating(mag?: number): string {
+  if (typeof mag !== "number") return "—";
   if (mag < 2.0) return "Urban Sky (Naked Eye)";
   if (mag < 4.5) return "Dark Sky (Naked Eye)";
   if (mag < 6.5) return "Pristine Sky / Binoculars";
@@ -110,7 +113,7 @@ const InfoRow = memo(function InfoRow({
           {value}
         </div>
         {subValue && (
-          <div className="text-[8px] text-slate-400 font-sans tracking-normal sm:text-[9px]">
+          <div className="font-sans text-[8px] tracking-normal text-slate-400 sm:text-[9px]">
             {subValue}
           </div>
         )}
@@ -130,23 +133,32 @@ export default function StarPanel({
     if (!star) return null;
     const isCurrentlyTracking = activeTarget?.id === star.id;
 
-    // 1. Klasifikasi Tipe Objek
-    const isPlanet = star.id <= 0;
-    const isDSO = !!star.type || !!star.messier || star.id > 200000;
-    const isStar = !isPlanet && !isDSO;
+    // 3. PERBAIKAN TYPE GUARD: Pastikan id bertipe 'number' sebelum menggunakan komparasi matematika (< atau >)
+    const isPlanet = typeof star.id === "number" && star.id <= 0;
+    const isDSO =
+      !!star.type ||
+      !!star.messier ||
+      (typeof star.id === "number" && star.id > 200000);
+
+    // Identifikasi rasi bintang jika tipe eksplisit atau ID-nya berupa string (misal "ORI", "TAU")
+    const isConstellation =
+      star.type === "constellation" || typeof star.id === "string";
+    const isStar = !isPlanet && !isDSO && !isConstellation;
 
     const spectral = getSpectralDetails(star.bv);
     const indicatorColor = getIndicatorColor(star, isPlanet);
 
-    // 2. Pembuatan Label Dinamis
+    // Pembuatan Label Dinamis
     let objectTypeLabel = "Celestial Object";
     if (isPlanet) objectTypeLabel = "Solar System Object";
+    else if (isConstellation) objectTypeLabel = "Constellation";
     else if (isDSO)
       objectTypeLabel = `Deep Space Object (${star.type || "DSO"})`;
     else objectTypeLabel = `Class ${spectral.class} Star`;
 
     let catalogLabel = `ID #${star.id}`;
     if (isPlanet) catalogLabel = "Ephemeris Data";
+    else if (isConstellation) catalogLabel = `IAU Code: ${star.id}`;
     else if (isDSO)
       catalogLabel = star.messier
         ? `Messier ${star.messier}`
@@ -156,25 +168,32 @@ export default function StarPanel({
     let displayName = star.name || "";
     if (!displayName) {
       if (isPlanet) displayName = "Planet";
+      else if (isConstellation) displayName = `${star.id} Constellation`;
       else if (isDSO) displayName = star.messier || `Object #${star.id}`;
       else displayName = `Star #${star.id}`;
     }
+
+    const safeAlt = typeof star.alt === "number" ? star.alt : 0;
+    const safeAz = typeof star.az === "number" ? star.az : 0;
 
     return {
       isPlanet,
       isDSO,
       isStar,
+      isConstellation,
       objectTypeLabel,
       catalogLabel,
       spectralTemp: spectral.temp,
       spectralDesc: spectral.desc,
       indicatorColor,
-      cardinal: azimuthToCardinal(star.az),
-      isNearHorizon: star.alt < 10,
-      isLowAltitude: star.alt < 15,
+      cardinal: azimuthToCardinal(safeAz),
+      isNearHorizon: safeAlt < 10,
+      isLowAltitude: safeAlt < 15,
       displayName,
       visibility: getVisibilityRating(star.mag),
       isCurrentlyTracking,
+      safeAlt,
+      safeAz,
     };
   }, [star, activeTarget]);
 
@@ -186,7 +205,7 @@ export default function StarPanel({
       aria-live="polite"
       className="pointer-events-auto absolute right-3 top-24 z-50 w-[min(92vw,22rem)] sm:right-4 sm:top-20"
     >
-      <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/55 font-mono backdrop-blur-2xl shadow-[0_12px_60px_rgba(0,0,0,0.55)] supports-backdrop-filter:bg-black/40">
+      <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/55 font-mono shadow-[0_12px_60px_rgba(0,0,0,0.55)] backdrop-blur-2xl supports-backdrop-filter:bg-black/40">
         <div className="h-px bg-linear-to-r from-transparent via-sky-400/40 to-transparent" />
 
         <div className="p-4">
@@ -195,7 +214,7 @@ export default function StarPanel({
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span
-                  className="h-2 w-2 rounded-full inline-block shrink-0"
+                  className="inline-block h-2 w-2 shrink-0 rounded-full"
                   style={{ backgroundColor: computed.indicatorColor }}
                 />
                 <div className="text-[8px] font-semibold uppercase tracking-[0.26em] text-sky-300/80 sm:text-[9px]">
@@ -265,21 +284,25 @@ export default function StarPanel({
 
           <div className="my-4 h-px bg-white/5" />
 
-          {/* Grid Informasi Bintang / DSO */}
+          {/* Grid Informasi Bintang / DSO / Rasi */}
           <div className="space-y-3">
-            <InfoRow
-              label="Magnitude"
-              value={star.mag.toFixed(2)}
-              subValue={computed.visibility}
-            />
+            {/* PERBAIKAN FATAL: Gunakan optional chaining dan fallback aman untuk menghindari undefined.toFixed */}
+            {!computed.isConstellation && (
+              <InfoRow
+                label="Magnitude"
+                value={typeof star.mag === "number" ? star.mag.toFixed(2) : "—"}
+                subValue={computed.visibility}
+              />
+            )}
+
             <InfoRow
               label="Altitude"
-              value={formatDegree(star.alt)}
+              value={formatDegree(computed.safeAlt)}
               highlight={computed.isLowAltitude}
             />
             <InfoRow
               label="Azimuth"
-              value={`${star.az.toFixed(1)}° ${computed.cardinal}`}
+              value={`${computed.safeAz.toFixed(1)}° ${computed.cardinal}`}
             />
 
             {/* Tampilan Khusus Bintang: Tampilkan Indeks B-V */}
@@ -291,13 +314,13 @@ export default function StarPanel({
               />
             )}
 
-            {/* Tampilan Khusus DSO: Tampilkan Tipe & Deskripsi jika ada */}
+            {/* Tampilan Khusus DSO: Tampilkan Deskripsi jika ada */}
             {computed.isDSO && star.description && (
               <div className="mt-2 border-t border-white/5 pt-2.5">
-                <span className="text-[9px] uppercase tracking-[0.18em] text-slate-500 block mb-1 sm:text-[10px]">
+                <span className="mb-1 block text-[9px] uppercase tracking-[0.18em] text-slate-500 sm:text-[10px]">
                   Description
                 </span>
-                <p className="text-[11px] font-sans leading-relaxed text-slate-300">
+                <p className="font-sans text-[11px] leading-relaxed text-slate-300">
                   {star.description}
                 </p>
               </div>

@@ -15,6 +15,8 @@ import {
   X,
   Check,
   Crosshair,
+  Maximize2,
+  RotateCcw, // Ikon untuk fitur reset
 } from "lucide-react";
 import TimeScrubber from "./time-scrubber";
 import StarPanel from "./star-panel";
@@ -24,21 +26,18 @@ export interface MapFilters {
   faintStars: boolean;
   planets: boolean;
   atmosphere: boolean;
-  gridHorizontal?: boolean; // Penambahan fitur toggle grid Alt/Az
+  gridHorizontal?: boolean;
   gridEquatorial?: boolean;
 }
 
 export interface HoveredStar {
-  id: number;
+  id: number | string;
   name?: string | null;
   mag: number;
+  bv?: number;
   alt: number;
   az: number;
-  bv?: number;
-  messier?: string;
   type?: string;
-  color?: string;
-  description?: string;
 }
 
 interface HUDProps {
@@ -56,6 +55,8 @@ interface HUDProps {
   setTime: React.Dispatch<React.SetStateAction<Date>>;
   hoveredStar: HoveredStar | null;
   onCloseStarTooltip: () => void;
+  zoomLevel?: number;
+  onResetView: () => void; // Fungsi baru untuk reset posisi & zoom
 }
 
 const TIME_FMT = new Intl.DateTimeFormat("en-US", {
@@ -135,9 +136,24 @@ export default function MapHUD({
   setTime,
   hoveredStar,
   onCloseStarTooltip,
+  zoomLevel = 0.85,
+  onResetView,
 }: HUDProps) {
   const [mounted, setMounted] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [dismissedTargetId, setDismissedTargetId] = useState<any>(null);
+  console.log("Search result", searchResults);
+
+  useEffect(() => {
+    setDismissedTargetId(null);
+  }, [activeTarget]);
+
+  const panelStar = useMemo(() => {
+    if (hoveredStar) return hoveredStar;
+    if (activeTarget && activeTarget.id !== dismissedTargetId)
+      return activeTarget;
+    return null;
+  }, [hoveredStar, activeTarget, dismissedTargetId]);
 
   useEffect(() => {
     setMounted(true);
@@ -153,8 +169,21 @@ export default function MapHUD({
     };
   }, [mounted, time]);
 
+  const fovDegrees = useMemo(() => {
+    const calculatedFov = (2.5 / zoomLevel) * (180 / Math.PI);
+    return Math.min(185, calculatedFov);
+  }, [zoomLevel]);
+
+  const fovPercentage = useMemo(() => {
+    const minFov = 15;
+    const maxFov = 185;
+    const clamped = Math.max(minFov, Math.min(maxFov, fovDegrees));
+    return ((clamped - minFov) / (maxFov - minFov)) * 100;
+  }, [fovDegrees]);
+
   return (
     <div className="pointer-events-none absolute inset-0 z-40 select-none font-mono text-white">
+      {/* LEFT TOP PANEL: Observer & Search */}
       <div className="pointer-events-auto absolute left-4 top-4 flex w-72 flex-col gap-2 sm:left-5 sm:top-5">
         <Panel>
           <div className="flex items-center justify-between px-4 py-3">
@@ -255,9 +284,21 @@ export default function MapHUD({
                     </div>
                     <div className="mt-0.5 text-[9px] uppercase tracking-[0.14em] text-slate-600">
                       {obj.messier ? `${obj.messier} · ` : ""}
-                      {typeof obj.mag === "number"
-                        ? `mag ${obj.mag.toFixed(2)}`
-                        : "mag --"}
+
+                      {obj.type === "Constellation" ? (
+                        <div className="flex items-center gap-1.5 text-sky-400/80">
+                          <span className="font-bold border border-sky-500/30 px-1 rounded-xs text-[7px]">
+                            {obj.id.toUpperCase()}
+                          </span>
+                          <span>
+                            RA {Math.floor(obj.ra / 15)}h · Dec {obj.dec}°
+                          </span>
+                        </div>
+                      ) : typeof obj.mag === "number" ? (
+                        `mag ${obj.mag.toFixed(2)}`
+                      ) : (
+                        "mag --"
+                      )}
                     </div>
                   </div>
                   <Crosshair
@@ -297,6 +338,7 @@ export default function MapHUD({
         )}
       </div>
 
+      {/* RIGHT TOP PANEL: Filters */}
       <div className="pointer-events-auto absolute right-4 top-4 flex flex-col items-end gap-2 sm:right-5 sm:top-5">
         <button
           type="button"
@@ -358,6 +400,7 @@ export default function MapHUD({
         )}
       </div>
 
+      {/* BOTTOM PANEL: Time, FOV & Reset View */}
       <div className="pointer-events-auto absolute bottom-4 left-4 right-4 flex flex-col gap-2 sm:bottom-5 sm:left-5 sm:right-5">
         <div className="flex items-end justify-between gap-3">
           <Panel className="px-4 py-3">
@@ -381,9 +424,46 @@ export default function MapHUD({
               </div>
             </div>
           </Panel>
+
           <TimeScrubber time={time} onTimeChange={setTime} />
 
-          <div className="flex flex-col items-end gap-1.5">
+          <div className="flex flex-col items-end gap-2">
+            {/* FITUR RESET VIEW BARU */}
+            <button
+              type="button"
+              onClick={onResetView}
+              className="group flex h-10 items-center gap-3 rounded-2xl border border-white/10 bg-black/50 px-4 text-slate-400 shadow-[0_8px_32px_rgba(0,0,0,0.4)] backdrop-blur-2xl transition-all hover:border-sky-500/30 hover:text-sky-300 hover:shadow-[0_0_24px_rgba(56,189,248,0.15)]"
+            >
+              <RotateCcw
+                size={14}
+                className="transition-transform group-hover:-rotate-90"
+              />
+              <span className="text-[9px] font-bold uppercase tracking-[0.2em]">
+                Reset Perspective
+              </span>
+            </button>
+
+            {/* PANEL INDIKATOR POV (FIELD OF VIEW) */}
+            <Panel className="flex items-center gap-2 px-3 py-2">
+              <Maximize2 size={10} className="text-sky-400" />
+              <div className="flex flex-col items-end">
+                <div className="flex items-baseline gap-1">
+                  <span className="text-[10px] font-bold tabular-nums text-slate-200">
+                    {fovDegrees.toFixed(1)}°
+                  </span>
+                  <span className="text-[7px] font-medium uppercase tracking-widest text-slate-500">
+                    FOV
+                  </span>
+                </div>
+                <div className="mt-0.5 h-0.5 w-16 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full bg-sky-400 transition-all duration-75"
+                    style={{ width: `${fovPercentage}%` }}
+                  />
+                </div>
+              </div>
+            </Panel>
+
             <Panel className="px-3 py-2">
               <div className="flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
@@ -403,12 +483,18 @@ export default function MapHUD({
           </div>
         </div>
       </div>
+
       <StarPanel
-        star={hoveredStar}
+        star={panelStar}
         onTrackStar={onSelectTarget}
         activeTarget={activeTarget}
         onClearTarget={onClearTarget}
-        onClose={onCloseStarTooltip}
+        onClose={() => {
+          onCloseStarTooltip();
+          if (activeTarget && panelStar && activeTarget.id === panelStar.id) {
+            setDismissedTargetId(activeTarget.id);
+          }
+        }}
       />
     </div>
   );

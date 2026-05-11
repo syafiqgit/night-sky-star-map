@@ -14,11 +14,6 @@ interface Star {
   name?: string | null;
 }
 
-interface Constellation {
-  name: string;
-  lines: [number, number][];
-}
-
 interface DeepSpaceObject {
   id: number;
   name: string;
@@ -31,12 +26,13 @@ interface DeepSpaceObject {
 }
 
 export interface HoveredStar {
-  id: number;
+  id: number | string;
   name?: string | null;
   mag: number;
   bv?: number;
   alt: number;
   az: number;
+  type?: string;
 }
 
 interface ProjectedStar extends Star {
@@ -47,14 +43,22 @@ interface ProjectedStar extends Star {
   isPlanet?: boolean;
   colorStr?: string;
   radiusPx?: number;
+  parent?: string; // Tambahkan properti parent
 }
 
 type RenderableObject = Pick<ProjectedStar, "id" | "baseAlt" | "baseAz"> &
   Partial<ProjectedStar>;
 
+export interface PopularConstellation {
+  id: string;
+  name: string;
+  center: [number, number];
+  lines: Array<Array<[number, number]>>;
+}
+
 export interface StarCanvasProps {
   stars: Star[];
-  constellations: Constellation[];
+  constellations?: PopularConstellation[];
   solarSystem: any[];
   observer: { lat: number; lon: number };
   dsos: DeepSpaceObject[];
@@ -65,11 +69,14 @@ export interface StarCanvasProps {
     faintStars: boolean;
     planets: boolean;
     atmosphere: boolean;
-    gridHorizontal?: boolean; // Penambahan fitur toggle grid Alt/Az
-    gridEquatorial?: boolean; // Penambahan fitur toggle grid RA/Dec
+    gridHorizontal?: boolean;
+    gridEquatorial?: boolean;
   };
-  activeTarget: Star | null;
+  activeTarget: any | null;
+  onSelectTarget: (target: any) => void;
   onClearTarget: () => void;
+  zoomLevel?: number;
+  onZoomChange?: (newZoom: number) => void;
 }
 
 const MAX_MAG = 6.5;
@@ -80,6 +87,11 @@ const DESKTOP_DPR = 2;
 const MOBILE_HOVER_RADIUS = 28;
 const DESKTOP_HOVER_RADIUS = 16;
 const CLICK_MOVE_THRESHOLD = 6;
+const MAX_FOV_DEG = 185;
+const MIN_FOV_DEG = 0.000278; // Batas Stellarium
+const MIN_ZOOM_LEVEL = (2.5 * 180) / (Math.PI * MAX_FOV_DEG);
+// Perhitungan otomatis untuk mencapai FOV 0.000278
+const MAX_ZOOM_LEVEL = (MAX_FOV_DEG / MIN_FOV_DEG) * MIN_ZOOM_LEVEL;
 
 const TARGET_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' fill='none'%3E%3Ccircle cx='16' cy='16' r='10' stroke='%23ffffff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23ffffff'/%3E%3C/svg%3E") 16 16, crosshair`;
 
@@ -200,20 +212,139 @@ function buildMilkyWayDust() {
   return dust;
 }
 
+function distToSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): number {
+  const C = x2 - x1;
+  const D = y2 - y1;
+  const lenSq = C * C + D * D;
+
+  if (lenSq === 0) {
+    return Math.hypot(px - x1, py - y1);
+  }
+
+  const t = Math.max(0, Math.min(1, ((px - x1) * C + (py - y1) * D) / lenSq));
+
+  const projX = x1 + t * C;
+  const projY = y1 + t * D;
+
+  return Math.hypot(px - projX, py - projY);
+}
+
+function getObjectKey(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    const obj = value as { id?: unknown; name?: unknown; messier?: unknown };
+    return getObjectKey(obj.id ?? obj.name ?? obj.messier);
+  }
+  return String(value);
+}
+
+function stableHash(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+interface SatelliteLayout {
+  x: number;
+  y: number;
+  labelX: number;
+  labelY: number;
+  leaderX1: number;
+  leaderY1: number;
+  leaderX2: number;
+  leaderY2: number;
+}
+
+function buildSatelliteLayout(
+  parent: { x: number; y: number; radiusPx?: number; id: number | string },
+  children: ProjectedStar[],
+  zoomScale: number,
+  isMobile: boolean,
+): Map<number, SatelliteLayout> {
+  const layouts = new Map<number, SatelliteLayout>();
+  if (children.length === 0) return layouts;
+
+  const sortedChildren = [...children].sort((a, b) => {
+    const aKey = `${a.name ?? ""}-${a.id}`;
+    const bKey = `${b.name ?? ""}-${b.id}`;
+    return aKey.localeCompare(bKey);
+  });
+
+  const parentRadius = Math.max(
+    24,
+    (parent.radiusPx ?? 4) * (isMobile ? 7 : 8) * zoomScale,
+  );
+  const baseAngle =
+    ((stableHash(getObjectKey(parent.id)) % 360) * Math.PI) / 180;
+  const slotCount = Math.max(1, Math.min(8, sortedChildren.length));
+
+  sortedChildren.forEach((child, index) => {
+    const ring = Math.floor(index / slotCount);
+    const slot = index % slotCount;
+    const spread = (slot / slotCount) * Math.PI * 2;
+    const angle = baseAngle + spread + ring * 0.28;
+    const distance =
+      parentRadius + 16 * zoomScale + ring * (18 * zoomScale) + slot * 1.25;
+    const x = parent.x + Math.cos(angle) * distance;
+    const y = parent.y + Math.sin(angle) * distance;
+    const labelDistance = distance + (isMobile ? 14 : 18) * zoomScale + 6;
+
+    layouts.set(child.id, {
+      x,
+      y,
+      labelX: parent.x + Math.cos(angle) * labelDistance,
+      labelY: parent.y + Math.sin(angle) * labelDistance,
+      leaderX1: parent.x,
+      leaderY1: parent.y,
+      leaderX2: x,
+      leaderY2: y,
+    });
+  });
+
+  return layouts;
+}
+
 export default function StarCanvas({
   stars,
-  constellations,
+  constellations = [],
   observer,
   time,
   onStarHover,
   filters,
   activeTarget,
+  onSelectTarget,
   onClearTarget,
   solarSystem,
   dsos,
+  zoomLevel: externalZoomLevel = 0.85,
+  onZoomChange,
 }: StarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderedStarsRef = useRef<Map<number, ProjectedStar>>(new Map());
+
+  const renderedConstellationsRef = useRef<
+    Map<
+      string,
+      {
+        id: string;
+        name: string;
+        x: number;
+        y: number;
+        baseAlt: number;
+        baseAz: number;
+        segments: Array<{ x1: number; y1: number; x2: number; y2: number }>;
+      }
+    >
+  >(new Map());
 
   const lastPointerRef = useRef({ x: 0, y: 0 });
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
@@ -238,10 +369,35 @@ export default function StarCanvas({
     };
   });
 
-  const latestObjectsRef = useRef<Map<number, RenderableObject>>(new Map());
+  const latestObjectsRef = useRef<Map<any, RenderableObject>>(new Map());
 
-  const [zoomLevel, setZoomLevel] = useState(0.85);
-  const zoomLevelRef = useRef(0.85);
+  const initialSafeZoom = useMemo(() => {
+    return clamp(externalZoomLevel, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
+  }, [externalZoomLevel]);
+
+  const [internalZoomLevel, setInternalZoomLevel] = useState(initialSafeZoom);
+  const currentZoomLevel = onZoomChange ? initialSafeZoom : internalZoomLevel;
+
+  const zoomLevelRef = useRef<number>(currentZoomLevel);
+  zoomLevelRef.current = currentZoomLevel;
+
+  useEffect(() => {
+    setInternalZoomLevel(clamp(externalZoomLevel, MIN_ZOOM_LEVEL, 15.0));
+  }, [externalZoomLevel]);
+
+  const updateZoomLevel = useCallback(
+    (updater: (prev: number) => number) => {
+      const nextZoom = updater(zoomLevelRef.current);
+      const clampedZoom = clamp(nextZoom, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
+
+      if (onZoomChange) {
+        onZoomChange(clampedZoom);
+      } else {
+        setInternalZoomLevel(clampedZoom);
+      }
+    },
+    [onZoomChange],
+  );
 
   const prevTargetRef = useRef<any>(null);
   const isAutoZoomingOutRef = useRef(false);
@@ -271,29 +427,23 @@ export default function StarCanvas({
   }, [observer.lat, observer.lon, activeTarget]);
 
   useEffect(() => {
-    zoomLevelRef.current = zoomLevel;
-  }, [zoomLevel]);
-
-  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-
       isAutoZoomingOutRef.current = false;
-
       if (activeTarget) onClearTarget();
 
-      setZoomLevel((prev) => {
+      updateZoomLevel((prev) => {
         const zoomFactor = e.deltaY > 0 ? 0.92 : 1.08;
-        return clamp(prev * zoomFactor, 0.45, 10.0);
+        return prev * zoomFactor;
       });
     };
 
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", handleWheel);
-  }, [activeTarget, onClearTarget]);
+  }, [activeTarget, onClearTarget, updateZoomLevel]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(
@@ -310,14 +460,17 @@ export default function StarCanvas({
 
   const baseMilkyWay = useMemo(() => buildMilkyWayDust(), []);
 
-  const baseStars = useMemo(() => {
-    const safeObserver = {
+  const safeObserver = useMemo(
+    () => ({
       lat: observer.lat,
       lon: observer.lon,
       latitude: observer.lat,
       longitude: observer.lon,
-    };
+    }),
+    [observer.lat, observer.lon],
+  );
 
+  const baseStars = useMemo(() => {
     return stars.map((star) => {
       const { altitude, azimuth } = equatorialToHorizontal(
         { ra: star.ra, dec: star.dec },
@@ -327,42 +480,32 @@ export default function StarCanvas({
 
       return { ...star, baseAlt: altitude, baseAz: azimuth };
     });
-  }, [observer.lat, observer.lon, stars, time]);
+  }, [safeObserver, stars, time]);
 
   const basePlanets = useMemo(() => {
-    const safeObserver = {
-      lat: observer.lat,
-      lon: observer.lon,
-      latitude: observer.lat,
-      longitude: observer.lon,
-    };
+    // MODIFIKASI: Urutkan agar satelit digambar lebih dulu (di layer bawah planet induknya)
+    return getSolarSystemObjects(time, solarSystem)
+      .sort((a: any, b: any) => (a.parent ? -1 : 1))
+      .map((planet: any) => {
+        const { altitude, azimuth } = equatorialToHorizontal(
+          { ra: planet.ra, dec: planet.dec },
+          safeObserver as any,
+          time,
+        );
 
-    return getSolarSystemObjects(time, solarSystem).map((planet) => {
-      const { altitude, azimuth } = equatorialToHorizontal(
-        { ra: planet.ra, dec: planet.dec },
-        safeObserver as any,
-        time,
-      );
-
-      return {
-        ...planet,
-        baseAlt: altitude,
-        baseAz: azimuth,
-        isPlanet: true,
-        colorStr: planet.color,
-        radiusPx: planet.radiusPx,
-      };
-    });
-  }, [observer.lat, observer.lon, time, solarSystem]);
+        return {
+          ...planet,
+          baseAlt: altitude,
+          baseAz: azimuth,
+          isPlanet: true,
+          colorStr: planet.color,
+          radiusPx: planet.radiusPx,
+          parent: planet.parent, // Pastikan data parent diteruskan
+        };
+      });
+  }, [safeObserver, time, solarSystem]);
 
   const baseDsos = useMemo(() => {
-    const safeObserver = {
-      lat: observer.lat,
-      lon: observer.lon,
-      latitude: observer.lat,
-      longitude: observer.lon,
-    };
-
     return dsos.map((dso) => {
       const { altitude, azimuth } = equatorialToHorizontal(
         { ra: dso.ra, dec: dso.dec },
@@ -376,16 +519,9 @@ export default function StarCanvas({
         baseAz: azimuth,
       };
     });
-  }, [dsos, observer.lat, observer.lon, time]);
+  }, [dsos, safeObserver, time]);
 
   const projectedMilkyWay = useMemo(() => {
-    const safeObserver = {
-      lat: observer.lat,
-      lon: observer.lon,
-      latitude: observer.lat,
-      longitude: observer.lon,
-    };
-
     return baseMilkyWay.map((cloud) => {
       const { altitude, azimuth } = equatorialToHorizontal(
         { ra: cloud.ra, dec: cloud.dec },
@@ -395,10 +531,51 @@ export default function StarCanvas({
 
       return { ...cloud, baseAlt: altitude, baseAz: azimuth };
     });
-  }, [baseMilkyWay, observer.lat, observer.lon, time]);
+  }, [baseMilkyWay, safeObserver, time]);
 
-  // ─── MEMOISASI SIMPUL GRID EKUATORIAL (RA/DEC) ──────────────────────────────
-  // Menghitung titik absolut bola langit secara presisi dan ringan di belakang layar.
+  const projectedConstellations = useMemo(() => {
+    if (
+      !filters.constellations ||
+      !constellations ||
+      constellations.length === 0
+    ) {
+      return [];
+    }
+
+    return constellations.map((con) => {
+      const raCenter = con.center[0];
+      const decCenter = con.center[1];
+
+      const { altitude: cAlt, azimuth: cAz } = equatorialToHorizontal(
+        { ra: raCenter, dec: decCenter },
+        safeObserver as any,
+        time,
+      );
+
+      const projectedLines =
+        con.lines?.map((segment) => {
+          return segment.map((point) => {
+            const raNode = point[0];
+            const decNode = point[1];
+
+            const { altitude, azimuth } = equatorialToHorizontal(
+              { ra: raNode, dec: decNode },
+              safeObserver as any,
+              time,
+            );
+            return { baseAlt: altitude, baseAz: azimuth };
+          });
+        }) ?? [];
+
+      return {
+        id: con.id,
+        name: con.name,
+        center: { baseAlt: cAlt, baseAz: cAz },
+        lines: projectedLines,
+      };
+    });
+  }, [filters.constellations, constellations, safeObserver, time]);
+
   const equatorialGridNodes = useMemo(() => {
     if (!filters.gridEquatorial) {
       return { raLines: [], decLines: [], equatorNodes: [] };
@@ -408,14 +585,6 @@ export default function StarCanvas({
     const decLines: Array<Array<{ baseAlt: number; baseAz: number }>> = [];
     const equatorNodes: Array<{ baseAlt: number; baseAz: number }> = [];
 
-    const safeObserver = {
-      lat: observer.lat,
-      lon: observer.lon,
-      latitude: observer.lat,
-      longitude: observer.lon,
-    };
-
-    // 1. Garis Bujur RA (Right Ascension) setiap 1 jam (15 derajat)
     for (let ra = 0; ra < 360; ra += 15) {
       const lineNodes: Array<{ baseAlt: number; baseAz: number }> = [];
       for (let dec = -85; dec <= 85; dec += 3) {
@@ -429,9 +598,8 @@ export default function StarCanvas({
       raLines.push(lineNodes);
     }
 
-    // 2. Garis Paralel Dec (Declination) setiap 15 derajat
     for (let dec = -75; dec <= 75; dec += 15) {
-      if (dec === 0) continue; // Ekuator 0° dipisahkan khusus
+      if (dec === 0) continue;
       const lineNodes: Array<{ baseAlt: number; baseAz: number }> = [];
       for (let ra = 0; ra <= 360; ra += 3) {
         const { altitude, azimuth } = equatorialToHorizontal(
@@ -444,7 +612,6 @@ export default function StarCanvas({
       decLines.push(lineNodes);
     }
 
-    // 3. Garis Utama Ekuator Langit (Dec = 0°)
     for (let ra = 0; ra <= 360; ra += 3) {
       const { altitude, azimuth } = equatorialToHorizontal(
         { ra: ra % 360, dec: 0 },
@@ -455,17 +622,25 @@ export default function StarCanvas({
     }
 
     return { raLines, decLines, equatorNodes };
-  }, [filters.gridEquatorial, observer.lat, observer.lon, time]);
+  }, [filters.gridEquatorial, safeObserver, time]);
 
   useEffect(() => {
-    const objectMap = new Map<number, RenderableObject>();
+    const objectMap = new Map<any, RenderableObject>();
 
     for (const star of baseStars) objectMap.set(star.id, star);
     for (const planet of basePlanets) objectMap.set(planet.id, planet);
     for (const dso of baseDsos) objectMap.set(dso.id, dso);
 
+    for (const con of projectedConstellations) {
+      objectMap.set(con.id, {
+        id: con.id as any,
+        baseAlt: con.center.baseAlt,
+        baseAz: con.center.baseAz,
+      });
+    }
+
     latestObjectsRef.current = objectMap;
-  }, [baseStars, basePlanets, baseDsos]);
+  }, [baseStars, basePlanets, baseDsos, projectedConstellations]);
 
   useEffect(() => {
     let frameId = 0;
@@ -483,24 +658,74 @@ export default function StarCanvas({
       if (activeTarget) {
         isAutoZoomingOutRef.current = false;
 
-        setZoomLevel((prev) => {
-          const diffZ = 4.5 - prev;
+        const isConstellationTarget = typeof activeTarget.id === "string";
+        const targetZoomLimit = isConstellationTarget ? 1.8 : 4.5;
+
+        updateZoomLevel((prev) => {
+          const diffZ = targetZoomLimit - prev;
           if (Math.abs(diffZ) > 0.005) {
             isMoving = true;
             return prev + diffZ * 0.08;
           }
-          return 4.5;
+          return targetZoomLimit;
         });
 
-        const targetObj = latestObjectsRef.current.get(activeTarget.id);
-        if (targetObj) {
+        let targetAz: number | null = null;
+        let targetAlt: number | null = null;
+
+        if (isConstellationTarget) {
+          const tCon = projectedConstellations.find(
+            (c) => c.id === activeTarget.id,
+          );
+
+          if (tCon && tCon.lines && tCon.lines.length > 0) {
+            let sumSinAz = 0;
+            let sumCosAz = 0;
+            let sumAlt = 0;
+            let count = 0;
+
+            for (const segment of tCon.lines) {
+              for (const node of segment) {
+                const azRad = node.baseAz * (Math.PI / 180);
+                sumSinAz += Math.sin(azRad);
+                sumCosAz += Math.cos(azRad);
+                sumAlt += node.baseAlt;
+                count++;
+              }
+            }
+
+            if (count > 0) {
+              const avgAzRad = Math.atan2(sumSinAz / count, sumCosAz / count);
+              targetAz = normalizeAzimuth(avgAzRad * (180 / Math.PI));
+              targetAlt = clamp(sumAlt / count, -90, 90);
+            }
+          }
+
+          if (targetAz === null || targetAlt === null) {
+            const fallbackObj = latestObjectsRef.current.get(activeTarget.id);
+            if (fallbackObj) {
+              targetAz = fallbackObj.baseAz;
+              targetAlt = fallbackObj.baseAlt;
+            }
+          }
+        } else {
+          const targetObj = latestObjectsRef.current.get(activeTarget.id);
+          if (targetObj) {
+            targetAz = targetObj.baseAz;
+            targetAlt = targetObj.baseAlt;
+          }
+        }
+
+        if (targetAz !== null && targetAlt !== null) {
+          const finalAz = targetAz;
+          const finalAlt = targetAlt;
+
           setViewAngle((prev) => {
-            let diffAz = (targetObj.baseAz - prev.az) % 360;
+            let diffAz = (finalAz - prev.az) % 360;
             if (diffAz > 180) diffAz -= 360;
             if (diffAz < -180) diffAz += 360;
 
-            const targetAlt = targetObj.baseAlt;
-            const diffAlt = targetAlt - prev.alt;
+            const diffAlt = finalAlt - prev.alt;
 
             if (Math.abs(diffAz) > 0.05 || Math.abs(diffAlt) > 0.05) {
               isMoving = true;
@@ -512,13 +737,13 @@ export default function StarCanvas({
 
             isMoving = true;
             return {
-              az: targetObj.baseAz,
-              alt: clamp(targetAlt, -90, 90),
+              az: finalAz,
+              alt: clamp(finalAlt, -90, 90),
             };
           });
         }
       } else if (isAutoZoomingOutRef.current) {
-        setZoomLevel((prev) => {
+        updateZoomLevel((prev) => {
           const defaultZoom = 0.85;
           const diffZ = defaultZoom - prev;
           if (Math.abs(diffZ) > 0.005) {
@@ -541,52 +766,79 @@ export default function StarCanvas({
       isActive = false;
       if (frameId) cancelAnimationFrame(frameId);
     };
-  }, [activeTarget]);
+  }, [activeTarget, updateZoomLevel, projectedConstellations]);
 
-  const findClosestStar = useCallback(
+  const selectObjectAtPoint = useCallback(
     (clientX: number, clientY: number) => {
       const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return null;
+      if (!rect) return;
 
       const mouseX = clientX - rect.left;
       const mouseY = clientY - rect.top;
 
-      let closestStar: ProjectedStar | null = null;
-      let minimumDistance = isMobile
-        ? MOBILE_HOVER_RADIUS
-        : DESKTOP_HOVER_RADIUS;
+      let foundTarget: any = null;
+      const baseRadius = isMobile ? MOBILE_HOVER_RADIUS : DESKTOP_HOVER_RADIUS;
+      let minimumDistance = baseRadius;
 
       for (const star of renderedStarsRef.current.values()) {
         const distance = Math.hypot(star.x - mouseX, star.y - mouseY);
         if (distance < minimumDistance) {
           minimumDistance = distance;
-          closestStar = star;
+          foundTarget = star;
         }
       }
 
-      return closestStar;
-    },
-    [isMobile],
-  );
-
-  const selectStarAtPoint = useCallback(
-    (clientX: number, clientY: number) => {
-      const closestStar = findClosestStar(clientX, clientY);
-
-      const selectedStar = closestStar
-        ? {
-            id: closestStar.id,
-            name: closestStar.name,
-            mag: closestStar.mag,
-            bv: closestStar.bv,
-            alt: closestStar.baseAlt,
-            az: closestStar.baseAz,
+      if (filters.constellations) {
+        const constellationRadius = baseRadius * 1.5;
+        for (const con of renderedConstellationsRef.current.values()) {
+          let minDistToCon = Math.hypot(con.x - mouseX, con.y - mouseY);
+          if (con.segments) {
+            for (const seg of con.segments) {
+              const dSeg = distToSegment(
+                mouseX,
+                mouseY,
+                seg.x1,
+                seg.y1,
+                seg.x2,
+                seg.y2,
+              );
+              if (dSeg < minDistToCon) minDistToCon = dSeg;
+            }
           }
-        : null;
+          if (
+            minDistToCon < constellationRadius &&
+            minDistToCon < minimumDistance
+          ) {
+            minimumDistance = minDistToCon;
+            foundTarget = constellations.find((c) => c.id === con.id);
+          }
+        }
+      }
 
-      onStarHover(selectedStar);
+      if (foundTarget) {
+        onSelectTarget(foundTarget);
+        onStarHover({
+          id: foundTarget.id,
+          name: foundTarget.name,
+          mag: foundTarget.mag || 0,
+          alt: foundTarget.baseAlt,
+          az: foundTarget.baseAz,
+          type:
+            typeof foundTarget.id === "string" ? "constellation" : undefined,
+        });
+      } else {
+        onClearTarget();
+        onStarHover(null);
+      }
     },
-    [findClosestStar, onStarHover],
+    [
+      isMobile,
+      filters.constellations,
+      constellations,
+      onSelectTarget,
+      onStarHover,
+      onClearTarget,
+    ],
   );
 
   useEffect(() => {
@@ -617,7 +869,7 @@ export default function StarCanvas({
 
     const centerX = width / 2;
     const centerY = height / 2;
-    const fovScale = (Math.max(width, height) / 2.5) * zoomLevel;
+    const fovScale = (Math.max(width, height) / 2.5) * currentZoomLevel;
 
     const bgGrad = context.createRadialGradient(
       centerX,
@@ -649,7 +901,6 @@ export default function StarCanvas({
       context.globalAlpha = 1;
     }
 
-    // Inline projection helper penangkap scope
     const proj = (bAlt: number, bAz: number) =>
       projectPlanetarium(
         bAlt,
@@ -663,16 +914,13 @@ export default function StarCanvas({
 
     if (filters.atmosphere && sunData && sunAlt > -18 && sunAlt < 10) {
       const sunProj = proj(sunData.baseAlt, sunData.baseAz);
-
       const tIntensity =
         sunAlt <= 0 ? (sunAlt + 18) / 18 : Math.max(0, 1 - sunAlt / 10);
-
       if (sunProj && tIntensity > 0) {
         context.globalAlpha = tIntensity;
-
         const glowRadius = Math.min(
           300,
-          Math.max(width, height) * 0.4 * zoomLevel,
+          Math.max(width, height) * 0.4 * currentZoomLevel,
         );
         const tGrad = context.createRadialGradient(
           sunProj.x,
@@ -682,12 +930,10 @@ export default function StarCanvas({
           sunProj.y,
           glowRadius,
         );
-
         tGrad.addColorStop(0, "rgba(249, 115, 22, 0.95)");
         tGrad.addColorStop(0.25, "rgba(225, 29, 72, 0.6)");
         tGrad.addColorStop(0.6, "rgba(76, 29, 149, 0.2)");
         tGrad.addColorStop(1, "rgba(0,0,0,0)");
-
         context.fillStyle = tGrad;
         context.beginPath();
         context.arc(sunProj.x, sunProj.y, glowRadius, 0, Math.PI * 2);
@@ -698,18 +944,16 @@ export default function StarCanvas({
 
     if (filters.atmosphere && sunAlt < -4) {
       const nightStrength = clamp((-sunAlt - 4) / 18, 0, 1);
-
       if (nightStrength > 0.04) {
         context.save();
         context.globalCompositeOperation = "screen";
-
-        const hazeRadius = Math.max(width, height) * (0.95 + zoomLevel * 0.08);
+        const hazeRadius =
+          Math.max(width, height) * (0.95 + currentZoomLevel * 0.08);
         const glowX =
           centerX + Math.cos((viewAngle.az * Math.PI) / 180) * width * 0.08;
         const glowY =
           centerY -
           Math.sin(((viewAngle.alt - 12) * Math.PI) / 180) * height * 0.08;
-
         const skyGrad = context.createLinearGradient(0, 0, 0, height);
         skyGrad.addColorStop(0, `rgba(125, 211, 252, ${0.05 * nightStrength})`);
         skyGrad.addColorStop(
@@ -717,11 +961,9 @@ export default function StarCanvas({
           `rgba(96, 165, 250, ${0.035 * nightStrength})`,
         );
         skyGrad.addColorStop(1, `rgba(30, 64, 175, ${0.02 * nightStrength})`);
-
         context.globalAlpha = 1;
         context.fillStyle = skyGrad;
         context.fillRect(0, 0, width, height);
-
         const hazeGrad = context.createRadialGradient(
           glowX,
           glowY,
@@ -730,7 +972,6 @@ export default function StarCanvas({
           glowY,
           hazeRadius,
         );
-
         hazeGrad.addColorStop(
           0,
           `rgba(147, 197, 253, ${0.18 * nightStrength})`,
@@ -744,12 +985,10 @@ export default function StarCanvas({
           `rgba(59, 130, 246, ${0.06 * nightStrength})`,
         );
         hazeGrad.addColorStop(1, "rgba(0,0,0,0)");
-
         context.fillStyle = hazeGrad;
         context.beginPath();
         context.arc(glowX, glowY, hazeRadius, 0, Math.PI * 2);
         context.fill();
-
         const hazeGrad2 = context.createRadialGradient(
           centerX,
           centerY * 0.85,
@@ -758,7 +997,6 @@ export default function StarCanvas({
           centerY * 0.85,
           hazeRadius * 0.7,
         );
-
         hazeGrad2.addColorStop(
           0,
           `rgba(186, 230, 253, ${0.08 * nightStrength})`,
@@ -768,32 +1006,28 @@ export default function StarCanvas({
           `rgba(96, 165, 250, ${0.04 * nightStrength})`,
         );
         hazeGrad2.addColorStop(1, "rgba(0,0,0,0)");
-
         context.fillStyle = hazeGrad2;
         context.beginPath();
         context.arc(centerX, centerY * 0.85, hazeRadius * 0.7, 0, Math.PI * 2);
         context.fill();
-
         context.restore();
         context.globalAlpha = 1;
       }
     }
 
-    const zoomScale = Math.max(1, 1 + (zoomLevel - 1) * 0.2);
+    const zoomScale = Math.max(1, 1 + (currentZoomLevel - 1) * 0.2);
+    // uiScale mencegah label dan garis menjadi raksasa saat zoom 500.000x
+    const uiScale = Math.min(zoomScale, 15);
+    const planetScale = 1 + (currentZoomLevel - 1) * 0.8;
 
     if (dayIntensity < 0.8) {
       context.globalAlpha = 1 - dayIntensity;
-
       for (const cloud of projectedMilkyWay) {
         const p = proj(cloud.baseAlt, cloud.baseAz);
-
         if (!p) continue;
-
         const cloudRadius = cloud.size * zoomScale;
-
         context.beginPath();
         context.arc(p.x, p.y, cloudRadius, 0, Math.PI * 2);
-
         const grad = context.createRadialGradient(
           p.x,
           p.y,
@@ -802,29 +1036,36 @@ export default function StarCanvas({
           p.y,
           cloudRadius,
         );
-
         grad.addColorStop(0, `rgba(147, 197, 253, ${cloud.alpha})`);
         grad.addColorStop(0.5, `rgba(167, 139, 250, ${cloud.alpha * 0.4})`);
         grad.addColorStop(1, "rgba(0, 0, 0, 0)");
-
         context.fillStyle = grad;
         context.fill();
       }
-
       context.globalAlpha = 1;
     }
 
     const visibleStars = new Map<number, ProjectedStar>();
+    const visibleLookup = new Map<string, ProjectedStar>();
+    const visiblePlanets: ProjectedStar[] = [];
 
     const projectVisibleObject = (obj: RenderableObject) => {
       const p = proj(obj.baseAlt, obj.baseAz);
-
       if (!p) return;
-      visibleStars.set(obj.id, {
+
+      const projected: ProjectedStar = {
         ...(obj as ProjectedStar),
         x: p.x,
         y: p.y,
-      });
+      };
+
+      visibleStars.set(obj.id, projected);
+      visibleLookup.set(String(obj.id), projected);
+      if (projected.name) visibleLookup.set(projected.name, projected);
+      if ((projected as any).messier) {
+        visibleLookup.set(String((projected as any).messier), projected);
+      }
+      if (projected.isPlanet) visiblePlanets.push(projected);
     };
 
     for (const star of baseStars) projectVisibleObject(star);
@@ -833,27 +1074,57 @@ export default function StarCanvas({
       for (const planet of basePlanets) projectVisibleObject(planet);
     }
 
+    const satelliteLayouts = new Map<number, SatelliteLayout>();
+    const satellitesByParent = new Map<string, ProjectedStar[]>();
+
+    for (const planet of visiblePlanets) {
+      const parentKey = getObjectKey((planet as any).parent);
+      if (!parentKey) continue;
+
+      if (!satellitesByParent.has(parentKey)) {
+        satellitesByParent.set(parentKey, []);
+      }
+      satellitesByParent.get(parentKey)!.push(planet);
+    }
+
+    for (const [parentKey, children] of satellitesByParent.entries()) {
+      const parentObj = visibleLookup.get(parentKey);
+      if (!parentObj) continue;
+
+      const layouts = buildSatelliteLayout(
+        parentObj,
+        children,
+        zoomScale,
+        isMobile,
+      );
+
+      for (const [id, layout] of layouts.entries()) {
+        satelliteLayouts.set(id, layout);
+
+        const projected = visibleStars.get(id);
+        if (projected) {
+          projected.x = layout.x;
+          projected.y = layout.y;
+          visibleStars.set(id, projected);
+        }
+      }
+    }
+
     renderedStarsRef.current = visibleStars;
 
     if (dayIntensity < 0.75) {
       context.globalAlpha = 1 - dayIntensity * 0.9;
-
       for (const dso of baseDsos) {
         const p = proj(dso.baseAlt, dso.baseAz);
-
         if (!p) continue;
-        if (zoomLevel < 1.5 && dso.mag > 7) continue;
-
+        if (currentZoomLevel < 1.5 && dso.mag > 7) continue;
         const size =
           Math.max(2, (8 - Math.min(dso.mag, 8)) * 0.7) *
-          Math.max(1, zoomLevel * 0.5);
-
+          Math.max(1, currentZoomLevel * 0.5);
         context.save();
         context.translate(p.x, p.y);
-
         context.shadowBlur = 20 * zoomScale;
         context.shadowColor = dso.color;
-
         switch (dso.type) {
           case "galaxy":
             context.strokeStyle = dso.color;
@@ -870,7 +1141,6 @@ export default function StarCanvas({
             );
             context.stroke();
             break;
-
           case "nebula": {
             const grad = context.createRadialGradient(0, 0, 0, 0, 0, size * 3);
             grad.addColorStop(0, `${dso.color}bb`);
@@ -881,14 +1151,11 @@ export default function StarCanvas({
             context.fill();
             break;
           }
-
           case "cluster":
             context.fillStyle = dso.color;
-
             for (let i = 0; i < 10; i++) {
               const angle = (Math.PI * 2 * i) / 10;
               const r = size * 1.5;
-
               context.beginPath();
               context.arc(
                 Math.cos(angle) * r * 0.5,
@@ -900,113 +1167,271 @@ export default function StarCanvas({
               context.fill();
             }
             break;
-
           default:
             context.fillStyle = dso.color;
             context.beginPath();
             context.arc(0, 0, size, 0, Math.PI * 2);
             context.fill();
         }
-
         context.shadowBlur = 0;
-
-        if (zoomLevel > 2.2) {
+        if (currentZoomLevel > 2.2) {
           context.fillStyle = "rgba(255,255,255,0.8)";
           context.font = `${10 * zoomScale}px monospace`;
           context.textAlign = "center";
           context.fillText(dso.messier || dso.name, 0, -size * 3);
         }
-
         context.restore();
       }
-
       context.globalAlpha = 1;
     }
 
-    if (filters.constellations && dayIntensity < 0.9) {
-      context.globalAlpha = 1 - dayIntensity;
-      context.strokeStyle = "rgba(125, 211, 252, 0.25)";
-      context.lineWidth = (isMobile ? 0.7 : 1.2) * zoomScale;
-      context.setLineDash(isMobile ? [2, 4] : [3, 6]);
-
-      for (const constellation of constellations) {
-        const nodes: ProjectedStar[] = [];
-
-        for (const [startId, endId] of constellation.lines) {
-          const start = visibleStars.get(startId);
-          const end = visibleStars.get(endId);
-          if (!start || !end) continue;
-
-          context.beginPath();
-          context.moveTo(start.x, start.y);
-          context.lineTo(end.x, end.y);
-          context.stroke();
-
-          if (!nodes.includes(start)) nodes.push(start);
-          if (!nodes.includes(end)) nodes.push(end);
-        }
-
-        if (nodes.length > 0) {
-          const lx = nodes.reduce((acc, n) => acc + n.x, 0) / nodes.length;
-          const ly = nodes.reduce((acc, n) => acc + n.y, 0) / nodes.length;
-
-          context.setLineDash([]);
-          context.font = `bold ${(isMobile ? 8 : 10) * zoomScale}px 'Courier New', monospace`;
-          context.shadowBlur = 4;
-          context.shadowColor = "#000000";
-          context.fillStyle = "rgba(148, 163, 184, 0.6)";
-          context.textAlign = "center";
-          context.fillText(
-            constellation.name.toUpperCase(),
-            lx,
-            ly - 12 * zoomScale,
-          );
-          context.shadowBlur = 0;
-          context.setLineDash(isMobile ? [2, 4] : [3, 6]);
-        }
-      }
-
-      context.globalAlpha = 1;
-    }
-
-    // ─── PENGGAMBARAN JALUR GRID AMAN DENGAN PEMUTUS GARIS (CLIP PROJECTION) ───
     const drawProjectedPath = (
       nodes: Array<{ baseAlt: number; baseAz: number }>,
       color: string,
       lineWidth: number,
       dashPattern: number[] = [],
+      maxSegmentAngleDeg: number = 45,
+      outSegments?: Array<{ x1: number; y1: number; x2: number; y2: number }>,
     ) => {
-      context.beginPath();
       context.strokeStyle = color;
       context.lineWidth = lineWidth;
       context.setLineDash(dashPattern);
-
-      let isDrawing = false;
-
+      let prevNode: { baseAlt: number; baseAz: number } | null = null;
+      let prevPoint: { x: number; y: number } | null = null;
       for (const node of nodes) {
-        const p = proj(node.baseAlt, node.baseAz);
-        if (p) {
-          if (!isDrawing) {
-            context.moveTo(p.x, p.y);
-            isDrawing = true;
-          } else {
-            context.lineTo(p.x, p.y);
-          }
-        } else {
-          isDrawing = false; // Putuskan garis jika keluar dari cakrawala pandangan
+        if (node.baseAlt < -90) {
+          prevNode = null;
+          prevPoint = null;
+          continue;
         }
+        const p = proj(node.baseAlt, node.baseAz);
+        if (!p) {
+          prevNode = null;
+          prevPoint = null;
+          continue;
+        }
+        if (prevPoint !== null && prevNode !== null) {
+          let shouldDraw = true;
+          if (maxSegmentAngleDeg < Infinity) {
+            const alt1Rad = prevNode.baseAlt * (Math.PI / 180);
+            const alt2Rad = node.baseAlt * (Math.PI / 180);
+            const deltaAzRad =
+              (node.baseAz - prevNode.baseAz) * (Math.PI / 180);
+            const cosC =
+              Math.sin(alt1Rad) * Math.sin(alt2Rad) +
+              Math.cos(alt1Rad) * Math.cos(alt2Rad) * Math.cos(deltaAzRad);
+            const clampedCosC = Math.max(-1, Math.min(1, cosC));
+            const arcAngleDeg = Math.acos(clampedCosC) * (180 / Math.PI);
+            if (arcAngleDeg > maxSegmentAngleDeg) shouldDraw = false;
+          }
+          const screenDist = Math.hypot(p.x - prevPoint.x, p.y - prevPoint.y);
+          if (screenDist > width * 0.6) shouldDraw = false;
+          if (shouldDraw) {
+            context.beginPath();
+            context.moveTo(prevPoint.x, prevPoint.y);
+            context.lineTo(p.x, p.y);
+            context.stroke();
+            if (outSegments)
+              outSegments.push({
+                x1: prevPoint.x,
+                y1: prevPoint.y,
+                x2: p.x,
+                y2: p.y,
+              });
+          }
+        }
+        prevNode = node;
+        prevPoint = { x: p.x, y: p.y };
       }
-      context.stroke();
     };
 
-    // ─── 1. MENGGAMBAR GRID HORIZONTAL (ALT/AZ) - SOFT CYAN ───────────────────
+    const visibleConstellations = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        x: number;
+        y: number;
+        baseAlt: number;
+        baseAz: number;
+        segments: Array<{ x1: number; y1: number; x2: number; y2: number }>;
+      }
+    >();
+
+    if (
+      filters.constellations &&
+      dayIntensity < 0.9 &&
+      projectedConstellations.length > 0
+    ) {
+      context.save();
+      context.globalAlpha = 1 - dayIntensity;
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      const SAFE_CONSTELLATION_SEGMENT_DEG = 120;
+      const DOT_RADIUS_OUTER = (isMobile ? 2.5 : 3.5) * zoomScale;
+      const DOT_RADIUS_INNER = (isMobile ? 1.2 : 1.8) * zoomScale;
+      const DOT_GLOW_BLUR = (isMobile ? 6 : 10) * zoomScale;
+
+      for (const con of projectedConstellations) {
+        const isActiveCon = activeTarget && activeTarget.id === con.id;
+        const LINE_COLOR = isActiveCon
+          ? "rgba(34, 197, 94, 0.95)"
+          : "rgba(125, 211, 252, 0.75)";
+        const LINE_WIDTH =
+          (isActiveCon ? (isMobile ? 1.5 : 2.0) : isMobile ? 0.9 : 1.3) *
+          zoomScale;
+        const GLOW_COLOR = isActiveCon
+          ? "rgba(34, 197, 94, 0.3)"
+          : "rgba(125, 211, 252, 0.2)";
+        const GLOW_WIDTH =
+          (isActiveCon ? (isMobile ? 5.0 : 8.0) : isMobile ? 3.5 : 5.5) *
+          zoomScale;
+
+        context.globalCompositeOperation = "screen";
+        context.lineWidth = GLOW_WIDTH;
+        context.strokeStyle = GLOW_COLOR;
+        context.setLineDash([]);
+        for (const segmentNodes of con.lines)
+          drawProjectedPath(
+            segmentNodes,
+            GLOW_COLOR,
+            GLOW_WIDTH,
+            [],
+            SAFE_CONSTELLATION_SEGMENT_DEG,
+          );
+
+        context.globalCompositeOperation = "source-over";
+        const currentSegments: Array<{
+          x1: number;
+          y1: number;
+          x2: number;
+          y2: number;
+        }> = [];
+        for (const segmentNodes of con.lines)
+          drawProjectedPath(
+            segmentNodes,
+            LINE_COLOR,
+            LINE_WIDTH,
+            [],
+            SAFE_CONSTELLATION_SEGMENT_DEG,
+            currentSegments,
+          );
+
+        const nodeSet = new Map<string, { x: number; y: number }>();
+        for (const segmentNodes of con.lines) {
+          for (const node of segmentNodes) {
+            if (node.baseAlt < -90) continue;
+            const p = proj(node.baseAlt, node.baseAz);
+            if (!p) continue;
+            const key = `${Math.round(p.x)},${Math.round(p.y)}`;
+            if (!nodeSet.has(key)) nodeSet.set(key, { x: p.x, y: p.y });
+          }
+        }
+
+        for (const { x, y } of nodeSet.values()) {
+          context.save();
+          context.shadowBlur = DOT_GLOW_BLUR;
+          context.shadowColor = isActiveCon
+            ? "rgba(74, 222, 128, 0.9)"
+            : "rgba(147, 223, 255, 0.9)";
+          const outerGrad = context.createRadialGradient(
+            x,
+            y,
+            0,
+            x,
+            y,
+            DOT_RADIUS_OUTER,
+          );
+          outerGrad.addColorStop(
+            0,
+            isActiveCon
+              ? "rgba(220, 252, 231, 1.0)"
+              : "rgba(210, 245, 255, 1.0)",
+          );
+          outerGrad.addColorStop(
+            0.5,
+            isActiveCon
+              ? "rgba(74, 222, 128, 0.75)"
+              : "rgba(125, 211, 252, 0.75)",
+          );
+          outerGrad.addColorStop(1, "rgba(56,  189, 248, 0.0)");
+          context.fillStyle = outerGrad;
+          context.beginPath();
+          context.arc(x, y, DOT_RADIUS_OUTER, 0, Math.PI * 2);
+          context.fill();
+          context.shadowBlur = DOT_GLOW_BLUR * 0.5;
+          context.fillStyle = isActiveCon
+            ? "rgba(240, 253, 244, 1.0)"
+            : "rgba(220, 248, 255, 1.0)";
+          context.beginPath();
+          context.arc(x, y, DOT_RADIUS_INNER, 0, Math.PI * 2);
+          context.fill();
+          context.restore();
+        }
+
+        if (con.name) {
+          let sumX = 0,
+            sumY = 0,
+            visibleCount = 0;
+          for (const point of nodeSet.values()) {
+            if (
+              point.x >= -width &&
+              point.x <= width * 2 &&
+              point.y >= -height &&
+              point.y <= height * 2
+            ) {
+              sumX += point.x;
+              sumY += point.y;
+              visibleCount++;
+            }
+          }
+          let labelX = 0,
+            labelY = 0,
+            hasValidLabel = false;
+          if (visibleCount > 0) {
+            labelX = sumX / visibleCount;
+            labelY = sumY / visibleCount;
+            hasValidLabel = true;
+          } else if (currentSegments.length > 0) {
+            const firstSeg = currentSegments[0];
+            labelX = (firstSeg.x1 + firstSeg.x2) / 2;
+            labelY = (firstSeg.y1 + firstSeg.y2) / 2;
+            hasValidLabel = true;
+          }
+
+          if (hasValidLabel) {
+            visibleConstellations.set(con.id, {
+              id: con.id,
+              name: con.name,
+              x: labelX,
+              y: labelY,
+              baseAlt: con.center.baseAlt,
+              baseAz: con.center.baseAz,
+              segments: currentSegments,
+            });
+            const fontSize = (isMobile ? 8 : 10) * zoomScale;
+            context.font = `bold ${fontSize}px 'Courier New', monospace`;
+            context.shadowBlur = 6;
+            context.shadowColor = "rgba(0,0,0,0.9)";
+            context.fillStyle = isActiveCon
+              ? "rgba(74, 222, 128, 0.95)"
+              : "rgba(148, 163, 184, 0.75)";
+            context.textAlign = "center";
+            context.fillText(con.name.toUpperCase(), labelX, labelY);
+            context.shadowBlur = 0;
+          }
+        }
+      }
+      context.restore();
+    }
+
+    renderedConstellationsRef.current = visibleConstellations;
+
     if (filters.gridHorizontal) {
-      // Garis Azimuth (Vertikal mata angin: dari Zenith 90° turun ke Horizon 0°)
       for (let az = 0; az < 360; az += 30) {
         const azNodes = [];
-        for (let alt = 0; alt <= 90; alt += 3) {
+        for (let alt = 0; alt <= 90; alt += 3)
           azNodes.push({ baseAlt: alt, baseAz: az });
-        }
         drawProjectedPath(
           azNodes,
           "rgba(56, 189, 248, 0.15)",
@@ -1014,13 +1439,10 @@ export default function StarCanvas({
           [2, 4],
         );
       }
-
-      // Garis Altitude (Konsentris elevasi: melingkari Zenith pada 15°, 30°, dst)
       for (let alt = 15; alt <= 75; alt += 15) {
         const altNodes = [];
-        for (let az = 0; az <= 360; az += 3) {
+        for (let az = 0; az <= 360; az += 3)
           altNodes.push({ baseAlt: alt, baseAz: az % 360 });
-        }
         drawProjectedPath(
           altNodes,
           "rgba(56, 189, 248, 0.2)",
@@ -1030,29 +1452,22 @@ export default function StarCanvas({
       }
     }
 
-    // ─── 2. MENGGAMBAR GRID EKUATORIAL (RA/DEC) - AMBER/JINGGA ────────────────
     if (filters.gridEquatorial) {
       const { raLines, decLines, equatorNodes } = equatorialGridNodes;
-
-      // Gambar garis bujur RA dan paralel Dec (putus-putus jingga tipis)
-      for (const line of raLines) {
+      for (const line of raLines)
         drawProjectedPath(
           line,
           "rgba(245, 158, 11, 0.18)",
           1 * zoomScale,
           [3, 5],
         );
-      }
-      for (const line of decLines) {
+      for (const line of decLines)
         drawProjectedPath(
           line,
           "rgba(245, 158, 11, 0.18)",
           1 * zoomScale,
           [3, 5],
         );
-      }
-
-      // Gambar Ekuator Langit secara spesifik (solid, tebal, dan sedikit berpendar)
       if (equatorNodes.length > 0) {
         context.save();
         context.shadowBlur = 6 * zoomScale;
@@ -1067,183 +1482,254 @@ export default function StarCanvas({
       }
     }
 
-    context.setLineDash([]); // Reset pola putus-putus untuk bintang dan planet
-
+    context.setLineDash([]);
     const MAG_LIMIT_BASE = filters.faintStars ? MAX_MAG : 3.5;
-
     let adjustedMagLimit = MAG_LIMIT_BASE;
-    if (zoomLevel > 3.0) adjustedMagLimit += (zoomLevel - 3.0) * 0.5;
-
+    if (currentZoomLevel > 3.0)
+      adjustedMagLimit += (currentZoomLevel - 3.0) * 0.5;
     const CURRENT_MAG_LIMIT =
       adjustedMagLimit - dayIntensity * (adjustedMagLimit + 2);
 
     for (const star of visibleStars.values()) {
       if (!star.isPlanet) {
         if (star.mag > CURRENT_MAG_LIMIT) continue;
-
         const normalizedMagnitude = Math.max(0, (MAX_MAG - star.mag) / MAX_MAG);
+        // Gunakan uiScale agar bintang tidak menutupi layar saat zoom dalam
         const radiusPx =
           Math.max(
             isMobile ? 0.6 : 0.4,
             normalizedMagnitude * (isMobile ? 3.0 : 2.6) + 0.2,
-          ) * zoomScale;
-
+          ) * uiScale;
         const starColor = getStarColor(star.bv);
         context.globalAlpha = Math.min(
           1,
           Math.max(0.1, (adjustedMagLimit - star.mag) / 5.5),
         );
-
-        if (star.mag < 2.5 && dayIntensity < 0.5) {
-          context.shadowBlur = (3 - star.mag) * 4 * zoomScale;
-          context.shadowColor = starColor;
-        } else {
-          context.shadowBlur = 0;
-        }
-
         context.fillStyle = starColor;
         context.beginPath();
         context.arc(star.x, star.y, radiusPx, 0, Math.PI * 2);
         context.fill();
-        context.shadowBlur = 0;
         continue;
       }
 
-      const planetScale = 1 + (zoomLevel - 1) * 0.8;
-      context.globalAlpha = 1;
+      const isSatellite = Boolean((star as any).parent) && star.name !== "Luna";
+      const satelliteLayout = satelliteLayouts.get(star.id);
 
+      // Gunakan koordinat dari layout offset jika tersedia, jika tidak pakai koordinat asli
+      const renderX = satelliteLayout?.x ?? star.x;
+      const renderY = satelliteLayout?.y ?? star.y;
+
+      context.globalAlpha = 1;
+      // Radius planet membesar sesuai zoom fisik (planetScale), bukan uiScale
       const radiusPx = (star.radiusPx || 4) * planetScale;
 
+      // Gambar Leader Line untuk Satelit
+      if (isSatellite && satelliteLayout) {
+        context.save();
+        context.globalAlpha = 0.3;
+        context.strokeStyle = "rgba(255, 255, 255, 0.5)";
+        context.lineWidth = 0.5 * uiScale;
+        context.beginPath();
+        context.moveTo(satelliteLayout.leaderX1, satelliteLayout.leaderY1);
+        context.lineTo(satelliteLayout.leaderX2, satelliteLayout.leaderY2);
+        context.stroke();
+        context.restore();
+      }
+
       if (star.id === 0) {
-        context.shadowBlur = 50 * zoomScale;
+        // Rendering Matahari tetap sama menggunakan renderX, renderY
+        context.shadowBlur = 50 * uiScale;
         context.shadowColor = "#f59e0b";
         context.fillStyle = "rgba(251, 191, 36, 0.4)";
         context.beginPath();
-        context.arc(star.x, star.y, radiusPx * 4, 0, Math.PI * 2);
+        context.arc(renderX, renderY, radiusPx * 4, 0, Math.PI * 2);
         context.fill();
-
-        context.shadowBlur = 10 * zoomScale;
         context.fillStyle = "#fffbeb";
         context.beginPath();
-        context.arc(star.x, star.y, radiusPx * 1.5, 0, Math.PI * 2);
+        context.arc(renderX, renderY, radiusPx * 1.5, 0, Math.PI * 2);
         context.fill();
         context.shadowBlur = 0;
       } else {
         const drawRadius = isMobile ? radiusPx * 1.2 : radiusPx;
-
-        context.shadowBlur = 15 * zoomScale;
+        context.shadowBlur = (isSatellite ? 7 : 15) * uiScale;
         context.shadowColor = star.colorStr || "#ffffff";
         context.fillStyle = star.colorStr || "#ffffff";
         context.beginPath();
-        context.arc(star.x, star.y, drawRadius, 0, Math.PI * 2);
+        context.arc(renderX, renderY, drawRadius, 0, Math.PI * 2);
         context.fill();
-
         context.shadowBlur = 0;
-        context.fillStyle = "rgba(255, 255, 255, 0.75)";
-        context.beginPath();
-        context.arc(star.x, star.y, drawRadius * 0.4, 0, Math.PI * 2);
-        context.fill();
+
+        // Label Nama (Hanya muncul jika zoom cukup atau sedang di-track)
+        if (isSatellite || currentZoomLevel > 3.0) {
+          const labelX = satelliteLayout?.labelX ?? renderX;
+          const labelY =
+            satelliteLayout?.labelY ?? renderY + drawRadius + 10 * uiScale;
+
+          context.save();
+          context.font = `${8 * uiScale}px monospace`;
+          context.textAlign = "center";
+
+          const label = star.name || "";
+          const metrics = context.measureText(label);
+          const bgW = metrics.width + 8 * uiScale;
+          const bgH = 12 * uiScale;
+
+          context.fillStyle = "rgba(2, 6, 23, 0.6)";
+          context.beginPath();
+          context.roundRect(
+            labelX - bgW / 2,
+            labelY - bgH / 2,
+            bgW,
+            bgH,
+            4 * uiScale,
+          );
+          context.fill();
+
+          context.fillStyle = "white";
+          context.fillText(label, labelX, labelY + 3 * uiScale);
+          context.restore();
+        }
       }
     }
 
     context.globalAlpha = 1;
-
     context.beginPath();
     context.strokeStyle = "rgba(56, 189, 248, 0.3)";
     context.lineWidth = 1.5 * zoomScale;
     context.setLineDash([4 * zoomScale, 6 * zoomScale]);
-
     let firstLine = true;
     for (let az = 0; az <= 360; az += 2) {
       const p = proj(0, az);
-
       if (p) {
         if (firstLine) {
           context.moveTo(p.x, p.y);
           firstLine = false;
-        } else {
-          context.lineTo(p.x, p.y);
-        }
-      } else {
-        firstLine = true;
-      }
+        } else context.lineTo(p.x, p.y);
+      } else firstLine = true;
     }
-
     context.stroke();
     context.setLineDash([]);
-
     context.textAlign = "center";
     context.fillStyle = "rgba(56, 189, 248, 0.8)";
     context.font = `bold ${isMobile ? 10 * zoomScale : 12 * zoomScale}px 'Courier New', monospace`;
 
     for (const point of CARDINAL_POINTS) {
       const p = proj(0, point.az);
-
-      if (p && p.visible) {
+      if (p && p.visible)
         context.fillText(point.label, p.x, p.y + 16 * zoomScale);
-      }
     }
 
     if (activeTarget) {
-      const t = visibleStars.get(activeTarget.id);
-
-      if (t) {
-        const timeOff = Date.now() / 400;
-        context.save();
-        context.translate(t.x, t.y);
-
-        const crosshairLength = 35 * zoomScale;
-        const innerGap = 15 * zoomScale;
-
-        context.setLineDash([]);
-        context.lineWidth = 1;
-        context.strokeStyle = "rgba(34, 197, 94, 0.6)";
-        context.beginPath();
-        context.moveTo(-crosshairLength, 0);
-        context.lineTo(-innerGap, 0);
-        context.moveTo(crosshairLength, 0);
-        context.lineTo(innerGap, 0);
-        context.moveTo(0, -crosshairLength);
-        context.lineTo(0, -innerGap);
-        context.moveTo(0, crosshairLength);
-        context.lineTo(0, innerGap);
-        context.stroke();
-
-        context.rotate(timeOff);
-        context.strokeStyle = "rgba(34, 197, 94, 0.9)";
-        context.lineWidth = 1.5;
-        context.setLineDash([8, 6]);
-        context.beginPath();
-        context.arc(0, 0, 24 * zoomScale, 0, Math.PI * 2);
-        context.stroke();
-
-        context.restore();
+      const isConstellationTarget = typeof activeTarget.id === "string";
+      if (isConstellationTarget) {
+        const tCon = projectedConstellations.find(
+          (c) => c.id === activeTarget.id,
+        );
+        if (tCon && tCon.lines && tCon.lines.length > 0) {
+          let minX = Infinity,
+            maxX = -Infinity,
+            minY = Infinity,
+            maxY = -Infinity,
+            hasVisibleNodes = false;
+          for (const segment of tCon.lines) {
+            for (const node of segment) {
+              if (node.baseAlt > -5) {
+                const p = proj(node.baseAlt, node.baseAz);
+                if (p && p.visible) {
+                  hasVisibleNodes = true;
+                  if (p.x < minX) minX = p.x;
+                  if (p.x > maxX) maxX = p.x;
+                  if (p.y < minY) minY = p.y;
+                  if (p.y > maxY) maxY = p.y;
+                }
+              }
+            }
+          }
+          if (hasVisibleNodes) {
+            const padding = 35 * zoomScale;
+            minX -= padding;
+            maxX += padding;
+            minY -= padding;
+            maxY += padding;
+            const timePulsing = (Math.sin(Date.now() / 300) + 1) / 2;
+            const bracketLen = 30 * zoomScale;
+            const strokeColor = `rgba(34, 197, 94, ${0.4 + timePulsing * 0.5})`;
+            context.save();
+            context.strokeStyle = strokeColor;
+            context.lineWidth = 2.0;
+            context.shadowBlur = 8;
+            context.shadowColor = "rgba(34, 197, 94, 0.8)";
+            context.beginPath();
+            context.moveTo(minX, minY + bracketLen);
+            context.lineTo(minX, minY);
+            context.lineTo(minX + bracketLen, minY);
+            context.moveTo(maxX - bracketLen, minY);
+            context.lineTo(maxX, minY);
+            context.lineTo(maxX, minY + bracketLen);
+            context.moveTo(maxX, maxY - bracketLen);
+            context.lineTo(maxX, maxY);
+            context.lineTo(maxX - bracketLen, maxY);
+            context.moveTo(minX + bracketLen, maxY);
+            context.lineTo(minX, maxY);
+            context.lineTo(minX, maxY - bracketLen);
+            context.stroke();
+            context.restore();
+          }
+        }
+      } else {
+        const tStar = visibleStars.get(activeTarget.id);
+        if (tStar) {
+          const timeOff = Date.now() / 400;
+          context.save();
+          context.translate(tStar.x, tStar.y);
+          const crosshairLength = 35 * zoomScale;
+          const innerGap = 15 * zoomScale;
+          context.setLineDash([]);
+          context.lineWidth = 1;
+          context.strokeStyle = "rgba(34, 197, 94, 0.6)";
+          context.beginPath();
+          context.moveTo(-crosshairLength, 0);
+          context.lineTo(-innerGap, 0);
+          context.moveTo(crosshairLength, 0);
+          context.lineTo(innerGap, 0);
+          context.moveTo(0, -crosshairLength);
+          context.lineTo(0, -innerGap);
+          context.moveTo(0, crosshairLength);
+          context.lineTo(0, innerGap);
+          context.stroke();
+          context.rotate(timeOff);
+          context.strokeStyle = "rgba(34, 197, 94, 0.9)";
+          context.lineWidth = 1.5;
+          context.setLineDash([8, 6]);
+          context.beginPath();
+          context.arc(0, 0, 24 * zoomScale, 0, Math.PI * 2);
+          context.stroke();
+          context.restore();
+        }
       }
     }
   }, [
     basePlanets,
     baseStars,
-    constellations,
     filters,
     isMobile,
     viewAngle,
     activeTarget,
-    zoomLevel,
+    currentZoomLevel,
     projectedMilkyWay,
     baseDsos,
     equatorialGridNodes,
+    projectedConstellations,
   ]);
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
-
       activePointers.current.set(event.pointerId, {
         x: event.clientX,
         y: event.clientY,
       });
-
       if (
         pointerDownRef.current &&
         !didPointerMoveRef.current &&
@@ -1254,7 +1740,6 @@ export default function StarCanvas({
       ) {
         didPointerMoveRef.current = true;
       }
-
       if (
         activePointers.current.size === 2 &&
         initialPinchDist.current !== null
@@ -1265,25 +1750,21 @@ export default function StarCanvas({
           pts[0].y - pts[1].y,
         );
         const scale = currentDist / initialPinchDist.current;
-
-        setZoomLevel(clamp(initialZoom.current * scale, 0.15, 15.0));
+        updateZoomLevel(() => initialZoom.current * scale);
         return;
       }
-
       if (activePointers.current.size === 1 && isDraggingRef.current) {
         const deltaX = event.clientX - lastPointerRef.current.x;
         const deltaY = event.clientY - lastPointerRef.current.y;
         lastPointerRef.current = { x: event.clientX, y: event.clientY };
-
         const baseSensitivity = isMobile
           ? VIEW_SENSITIVITY * 0.8
           : VIEW_SENSITIVITY;
         const sensitivity = baseSensitivity / zoomLevelRef.current;
-
         if (Math.hypot(deltaX, deltaY) > CLICK_MOVE_THRESHOLD) {
           didPointerMoveRef.current = true;
+          if (activeTarget) onClearTarget();
         }
-
         setViewAngle((prev) => ({
           az: normalizeAzimuth(prev.az - deltaX * sensitivity),
           alt: clamp(prev.alt + deltaY * sensitivity, -90, 90),
@@ -1291,24 +1772,20 @@ export default function StarCanvas({
         return;
       }
     },
-    [isMobile],
+    [isMobile, updateZoomLevel, activeTarget, onClearTarget],
   );
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-
       isAutoZoomingOutRef.current = false;
-
       activePointers.current.set(event.pointerId, {
         x: event.clientX,
         y: event.clientY,
       });
-
       pointerDownRef.current = { x: event.clientX, y: event.clientY };
       didPointerMoveRef.current = false;
-
       if (activePointers.current.size === 1) {
         isDraggingRef.current = true;
         setIsDragging(true);
@@ -1316,7 +1793,6 @@ export default function StarCanvas({
       } else if (activePointers.current.size === 2) {
         isDraggingRef.current = false;
         setIsDragging(false);
-
         const pts = Array.from(activePointers.current.values());
         initialPinchDist.current = Math.hypot(
           pts[0].x - pts[1].x,
@@ -1324,35 +1800,23 @@ export default function StarCanvas({
         );
         initialZoom.current = zoomLevelRef.current;
       }
-
-      if (activeTarget) onClearTarget();
     },
-    [activeTarget, onClearTarget],
+    [zoomLevelRef],
   );
 
   const handlePointerUp = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
       const target = event.currentTarget;
-
       try {
-        if (target.hasPointerCapture(event.pointerId)) {
+        if (target.hasPointerCapture(event.pointerId))
           target.releasePointerCapture(event.pointerId);
-        }
-      } catch {
-        // Ignore capture-release race on pointer cancellation / edge cases.
-      }
-
+      } catch {}
       const wasClick =
         activePointers.current.size === 1 &&
         !didPointerMoveRef.current &&
         pointerDownRef.current !== null;
-
       activePointers.current.delete(event.pointerId);
-
-      if (activePointers.current.size < 2) {
-        initialPinchDist.current = null;
-      }
-
+      if (activePointers.current.size < 2) initialPinchDist.current = null;
       if (activePointers.current.size === 0) {
         isDraggingRef.current = false;
         setIsDragging(false);
@@ -1362,34 +1826,22 @@ export default function StarCanvas({
         isDraggingRef.current = true;
         setIsDragging(true);
       }
-
-      if (wasClick) {
-        selectStarAtPoint(event.clientX, event.clientY);
-      }
-
+      if (wasClick) selectObjectAtPoint(event.clientX, event.clientY);
       pointerDownRef.current = null;
       didPointerMoveRef.current = false;
     },
-    [selectStarAtPoint],
+    [selectObjectAtPoint],
   );
 
   const handlePointerCancelOrLeave = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
       try {
         const target = event.currentTarget;
-        if (target.hasPointerCapture(event.pointerId)) {
+        if (target.hasPointerCapture(event.pointerId))
           target.releasePointerCapture(event.pointerId);
-        }
-      } catch {
-        // Ignore edge cases.
-      }
-
+      } catch {}
       activePointers.current.delete(event.pointerId);
-
-      if (activePointers.current.size < 2) {
-        initialPinchDist.current = null;
-      }
-
+      if (activePointers.current.size < 2) initialPinchDist.current = null;
       if (activePointers.current.size === 0) {
         isDraggingRef.current = false;
         setIsDragging(false);
@@ -1399,7 +1851,6 @@ export default function StarCanvas({
         isDraggingRef.current = true;
         setIsDragging(true);
       }
-
       pointerDownRef.current = null;
       didPointerMoveRef.current = false;
     },

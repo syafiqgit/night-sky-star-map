@@ -29,28 +29,32 @@ interface DSO {
   color: string;
 }
 interface Constellation {
+  id: string;
   name: string;
-  lines: [number, number][];
+  center: [number, number];
+  lines: Array<Array<[number, number]>>;
 }
 export interface HoveredStar {
-  id: number;
+  id: number | string;
   name?: string | null;
   mag: number;
   bv?: number;
   alt: number;
   az: number;
+  type?: string;
 }
 interface MapFilters {
   constellations: boolean;
   faintStars: boolean;
   planets: boolean;
   atmosphere: boolean;
-  gridHorizontal?: boolean; // Penambahan fitur toggle grid Alt/Az
+  gridHorizontal?: boolean;
   gridEquatorial?: boolean;
 }
 
 const DEFAULT_COORDS = { lat: -6.175, lon: 106.82 } as const;
 const CLOCK_INTERVAL_MS = 1000;
+const DEFAULT_ZOOM = 0.100; // Menggunakan nilai zoom awal pilihan Anda
 
 export default function Page() {
   const searchParams = useSearchParams();
@@ -66,7 +70,7 @@ export default function Page() {
     faintStars: searchParams.get("faintStars") !== "false",
     planets: searchParams.get("planets") !== "false",
     atmosphere: searchParams.get("atmosphere") !== "false",
-    gridHorizontal: searchParams.get("gridHorizontal") !== "false", 
+    gridHorizontal: searchParams.get("gridHorizontal") !== "false",
     gridEquatorial: searchParams.get("gridEquatorial") !== "false",
   };
 
@@ -81,6 +85,8 @@ export default function Page() {
   const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [filters, setFilters] = useState<MapFilters>(initialFilters);
   const [time, setTime] = useState(() => new Date());
+  const [zoomLevel, setZoomLevel] = useState(DEFAULT_ZOOM);
+  const [resetKey, setResetKey] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,11 +95,29 @@ export default function Page() {
     (star: HoveredStar | null) => setHoveredStar(star),
     [],
   );
+
   const toggleFilter = useCallback(
     (key: keyof MapFilters) =>
       setFilters((prev) => ({ ...prev, [key]: !prev[key] })),
     [],
   );
+
+  // 1. Gabungkan logika seleksi target agar konsisten (Kanvas & HUD)
+  const handleSelectTarget = useCallback((target: any) => {
+    setActiveTarget(target);
+    if (target) setSearchQuery(""); // Bersihkan search query jika objek dipilih
+  }, []);
+
+  const handleClearTarget = useCallback(() => {
+    setActiveTarget(null);
+  }, []);
+
+  const handleResetView = useCallback(() => {
+    setActiveTarget(null);
+    setSearchQuery("");
+    setZoomLevel(DEFAULT_ZOOM);
+    setResetKey((prev) => prev + 1);
+  }, []);
 
   const coordinates = useMemo(() => {
     return { lat, lon, isValid: isValidLatitude(lat) && isValidLongitude(lon) };
@@ -109,7 +133,6 @@ export default function Page() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-
     if (searchQuery) params.set("q", searchQuery);
     else params.delete("q");
 
@@ -124,7 +147,6 @@ export default function Page() {
 
   useEffect(() => {
     const controller = new AbortController();
-
     const delayDebounceFn = setTimeout(async () => {
       try {
         if (!stars.length) setLoading(true);
@@ -137,21 +159,17 @@ export default function Page() {
 
         const response = await fetch(
           `/api/object-astronomies?${queryParams.toString()}`,
-          {
-            signal: controller.signal,
-          },
+          { signal: controller.signal },
         );
 
         if (!response.ok) throw new Error("Gagal memuat katalog langit");
 
         const data = await response.json();
-
         setStars(data.stars);
         setConstellations(data.constellations);
         setDsos(data.dsos);
         setSolarSystem(data.solarSystem);
         setSearchResults(data.searchResults);
-
         setError(null);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -198,6 +216,7 @@ export default function Page() {
   return (
     <main className="relative h-full w-full overflow-hidden bg-black">
       <StarCanvas
+        key={`canvas-${resetKey}`}
         stars={stars}
         constellations={constellations}
         observer={{ lat, lon }}
@@ -206,8 +225,11 @@ export default function Page() {
         onStarHover={handleStarHover}
         filters={filters}
         activeTarget={activeTarget}
-        onClearTarget={() => setActiveTarget(null)}
+        onSelectTarget={handleSelectTarget} // SEKARANG KANVAS BISA MERUBAH TARGET
+        onClearTarget={handleClearTarget}
         dsos={dsos}
+        zoomLevel={zoomLevel}
+        onZoomChange={setZoomLevel}
       />
       <MapHUD
         lat={lat}
@@ -219,14 +241,13 @@ export default function Page() {
         onSearchChange={setSearchQuery}
         searchResults={searchResults}
         activeTarget={activeTarget}
-        onSelectTarget={(target) => {
-          setActiveTarget(target);
-          setSearchQuery("");
-        }}
-        onClearTarget={() => setActiveTarget(null)}
+        onSelectTarget={handleSelectTarget} // MENGGUNAKAN LOGIKA YANG SAMA
+        onClearTarget={handleClearTarget}
         setTime={setTime}
         hoveredStar={hoveredStar}
         onCloseStarTooltip={() => setHoveredStar(null)}
+        zoomLevel={zoomLevel}
+        onResetView={handleResetView}
       />
     </main>
   );
