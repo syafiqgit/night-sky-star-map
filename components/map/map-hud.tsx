@@ -169,25 +169,33 @@ export default function MapHUD({
     };
   }, [mounted, time]);
 
+  // --- PENYESUAIAN FOV DEGREES (185° sd 0.000278°) ---
   const fovDegrees = useMemo(() => {
     const MAX_FOV_DEG = 185;
-    const MIN_FOV_DEG = 0.000278; // Batas minimal sesuai Stellarium
+    const MIN_FOV_DEG = 0.000278;
 
-    // Rumus FOV dari StarCanvas: (2.5 / zoomLevel) * (180 / PI)
+    // Menghitung FOV aktual berdasarkan tingkat zoom
     const calculatedFov = (2.5 / zoomLevel) * (180 / Math.PI);
 
-    // Clamp agar angka tidak melewati batas limit baru
+    // Memastikan FOV tidak melebihi atau kurang dari batas limit absolut
     return Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, calculatedFov));
   }, [zoomLevel]);
 
+  // --- PENYESUAIAN PERSENTASE BAR (LOGARITMIK) ---
   const fovPercentage = useMemo(() => {
-    const minFov = 0.000278;
-    const maxFov = 185;
-    const clamped = Math.max(minFov, Math.min(maxFov, fovDegrees));
+    const MIN_FOV_DEG = 0.000278;
+    const MAX_FOV_DEG = 185;
 
-    // Menghitung persentase bar:
-    // 0% saat pandangan lebar (185°), 100% saat zoom maksimal (0.000278°)
-    return ((maxFov - clamped) / (maxFov - minFov)) * 100;
+    // Menggunakan skala logaritmik (Math.log10) agar pergerakan bar indikator
+    // tetap mulus dan proporsional saat melakukan zoom ekstrem dari derajat ke arcsecond.
+    const logMax = Math.log10(MAX_FOV_DEG);
+    const logMin = Math.log10(MIN_FOV_DEG);
+    const logCurrent = Math.log10(fovDegrees);
+
+    // 0% saat pandangan terluas (185°), 100% saat zoom terdalam (0.000278°)
+    const percentage = ((logMax - logCurrent) / (logMax - logMin)) * 100;
+
+    return Math.max(0, Math.min(100, percentage));
   }, [fovDegrees]);
 
   return (
@@ -437,7 +445,6 @@ export default function MapHUD({
           <TimeScrubber time={time} onTimeChange={setTime} />
 
           <div className="flex flex-col items-end gap-2">
-            {/* FITUR RESET VIEW BARU */}
             <button
               type="button"
               onClick={onResetView}
@@ -452,16 +459,18 @@ export default function MapHUD({
               </span>
             </button>
 
-            {/* PANEL INDIKATOR POV (FIELD OF VIEW) */}
+            {/* PANEL INDIKATOR FOV (FIELD OF VIEW) */}
             <Panel className="flex items-center gap-2 px-3 py-2">
               <Maximize2 size={10} className="text-sky-400" />
               <div className="flex flex-col items-end">
                 <div className="flex items-baseline gap-1">
                   <span className="text-[10px] font-bold tabular-nums text-slate-200">
-                    {/* Menggunakan 4 desimal agar presisi Stellarium terlihat */}
-                    {fovDegrees < 1
+                    {/* Mengatur jumlah digit desimal secara dinamis agar presisi tinggi terlihat */}
+                    {fovDegrees < 0.01
                       ? fovDegrees.toFixed(6)
-                      : fovDegrees.toFixed(2)}
+                      : fovDegrees < 1
+                        ? fovDegrees.toFixed(4)
+                        : fovDegrees.toFixed(2)}
                     °
                   </span>
                   <span className="text-[7px] font-medium uppercase tracking-widest text-slate-500">

@@ -5,6 +5,10 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { equatorialToHorizontal } from "@/lib/astro/coordinates";
 import { getSolarSystemObjects } from "@/lib/astro/ephemeris";
 
+/* ---------------------------------------------------------------- */
+/* Types                                                           */
+/* ---------------------------------------------------------------- */
+
 interface Star {
   id: number;
   ra: number;
@@ -43,7 +47,7 @@ interface ProjectedStar extends Star {
   isPlanet?: boolean;
   colorStr?: string;
   radiusPx?: number;
-  parent?: string; // Tambahkan properti parent
+  parent?: string;
 }
 
 type RenderableObject = Pick<ProjectedStar, "id" | "baseAlt" | "baseAz"> &
@@ -79,6 +83,10 @@ export interface StarCanvasProps {
   onZoomChange?: (newZoom: number) => void;
 }
 
+/* ---------------------------------------------------------------- */
+/* Constants                                                       */
+/* ---------------------------------------------------------------- */
+
 const MAX_MAG = 6.5;
 const VIEW_SENSITIVITY = 0.15;
 const MOBILE_BREAKPOINT = 768;
@@ -88,9 +96,8 @@ const MOBILE_HOVER_RADIUS = 28;
 const DESKTOP_HOVER_RADIUS = 16;
 const CLICK_MOVE_THRESHOLD = 6;
 const MAX_FOV_DEG = 185;
-const MIN_FOV_DEG = 0.000278; // Batas Stellarium
+const MIN_FOV_DEG = 0.000278;
 const MIN_ZOOM_LEVEL = (2.5 * 180) / (Math.PI * MAX_FOV_DEG);
-// Perhitungan otomatis untuk mencapai FOV 0.000278
 const MAX_ZOOM_LEVEL = (MAX_FOV_DEG / MIN_FOV_DEG) * MIN_ZOOM_LEVEL;
 
 const TARGET_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' fill='none'%3E%3Ccircle cx='16' cy='16' r='10' stroke='%23ffffff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23ffffff'/%3E%3C/svg%3E") 16 16, crosshair`;
@@ -124,6 +131,10 @@ const MILKY_WAY_NODES = [
   { ra: 250, dec: -40 },
   { ra: 266, dec: -29 },
 ];
+
+/* ---------------------------------------------------------------- */
+/* Helper functions                                                */
+/* ---------------------------------------------------------------- */
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -182,24 +193,19 @@ function getStarColor(bv?: number): string {
 function buildMilkyWayDust() {
   const dust: Array<{ ra: number; dec: number; size: number; alpha: number }> =
     [];
-
   for (let i = 0; i < MILKY_WAY_NODES.length - 1; i++) {
     const p1 = MILKY_WAY_NODES[i];
     const p2 = MILKY_WAY_NODES[i + 1];
-
     let raDiff = p2.ra - p1.ra;
     if (raDiff > 180) raDiff -= 360;
     if (raDiff < -180) raDiff += 360;
-
     for (let j = 0; j < 20; j++) {
       const t = j / 20;
       let ra = p1.ra + raDiff * t + (Math.random() - 0.5) * 15;
       if (ra < 0) ra += 360;
       if (ra >= 360) ra -= 360;
-
       const dec = p1.dec + (p2.dec - p1.dec) * t + (Math.random() - 0.5) * 12;
       const isCore = p1.ra === 266 || p1.ra === 250;
-
       dust.push({
         ra,
         dec,
@@ -208,7 +214,6 @@ function buildMilkyWayDust() {
       });
     }
   }
-
   return dust;
 }
 
@@ -223,16 +228,10 @@ function distToSegment(
   const C = x2 - x1;
   const D = y2 - y1;
   const lenSq = C * C + D * D;
-
-  if (lenSq === 0) {
-    return Math.hypot(px - x1, py - y1);
-  }
-
+  if (lenSq === 0) return Math.hypot(px - x1, py - y1);
   const t = Math.max(0, Math.min(1, ((px - x1) * C + (py - y1) * D) / lenSq));
-
   const projX = x1 + t * C;
   const projY = y1 + t * D;
-
   return Math.hypot(px - projX, py - projY);
 }
 
@@ -253,6 +252,10 @@ function stableHash(value: string): number {
   return Math.abs(hash);
 }
 
+/* ---------------------------------------------------------------- */
+/* Satellite layout builder                                         */
+/* ---------------------------------------------------------------- */
+
 interface SatelliteLayout {
   x: number;
   y: number;
@@ -268,6 +271,7 @@ function buildSatelliteLayout(
   parent: { x: number; y: number; radiusPx?: number; id: number | string },
   children: ProjectedStar[],
   zoomScale: number,
+  planetScale: number,
   isMobile: boolean,
 ): Map<number, SatelliteLayout> {
   const layouts = new Map<number, SatelliteLayout>();
@@ -279,10 +283,9 @@ function buildSatelliteLayout(
     return aKey.localeCompare(bKey);
   });
 
-  const parentRadius = Math.max(
-    24,
-    (parent.radiusPx ?? 4) * (isMobile ? 7 : 8) * zoomScale,
-  );
+  const actualParentDiskRadius = (parent.radiusPx ?? 4) * planetScale;
+  const baseOffset = actualParentDiskRadius + (isMobile ? 60 : 100) * zoomScale;
+
   const baseAngle =
     ((stableHash(getObjectKey(parent.id)) % 360) * Math.PI) / 180;
   const slotCount = Math.max(1, Math.min(8, sortedChildren.length));
@@ -291,11 +294,9 @@ function buildSatelliteLayout(
     const ring = Math.floor(index / slotCount);
     const slot = index % slotCount;
     const spread = (slot / slotCount) * Math.PI * 2;
-    const angle = baseAngle + spread + ring * 0.28;
+    const angle = baseAngle + spread + ring * 0.45;
 
-    // --- PERUBAHAN: Jarak diperlebar dari 16 menjadi 45, ring dari 18 menjadi 35 ---
-    const distance =
-      parentRadius + 45 * zoomScale + ring * (35 * zoomScale) + slot * 1.25;
+    const distance = baseOffset + ring * (120 * zoomScale) + slot * 15.0;
 
     const x = parent.x + Math.cos(angle) * distance;
     const y = parent.y + Math.sin(angle) * distance;
@@ -303,8 +304,8 @@ function buildSatelliteLayout(
     layouts.set(child.id, {
       x,
       y,
-      labelX: 0, // Tidak digunakan lagi
-      labelY: 0, // Tidak digunakan lagi
+      labelX: 0,
+      labelY: 0,
       leaderX1: parent.x,
       leaderY1: parent.y,
       leaderX2: x,
@@ -314,6 +315,10 @@ function buildSatelliteLayout(
 
   return layouts;
 }
+
+/* ---------------------------------------------------------------- */
+/* Main component                                                  */
+/* ---------------------------------------------------------------- */
 
 export default function StarCanvas({
   stars,
@@ -331,9 +336,7 @@ export default function StarCanvas({
   onZoomChange,
 }: StarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
   const renderedStarsRef = useRef<Map<number, ProjectedStar>>(new Map());
-
   const renderedConstellationsRef = useRef<
     Map<
       string,
@@ -365,58 +368,81 @@ export default function StarCanvas({
 
   const prevLocationRef = useRef({ lat: observer.lat, lon: observer.lon });
 
-  const [viewAngle, setViewAngle] = useState(() => {
-    return {
-      az: observer.lat < 0 ? 0 : 180,
-      alt: clamp(35 - Math.abs(observer.lat) * 0.3, 15, 45),
-    };
-  });
+  const [viewAngle, setViewAngle] = useState(() => ({
+    az: observer.lat < 0 ? 0 : 180,
+    alt: clamp(35 - Math.abs(observer.lat) * 0.3, 15, 45),
+  }));
 
   const latestObjectsRef = useRef<Map<any, RenderableObject>>(new Map());
 
-  const initialSafeZoom = useMemo(() => {
-    return clamp(externalZoomLevel, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
-  }, [externalZoomLevel]);
+  const initialSafeZoom = useMemo(
+    () => clamp(externalZoomLevel, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL),
+    [externalZoomLevel],
+  );
 
   const [internalZoomLevel, setInternalZoomLevel] = useState(initialSafeZoom);
-  const currentZoomLevel = onZoomChange ? initialSafeZoom : internalZoomLevel;
 
-  const zoomLevelRef = useRef<number>(currentZoomLevel);
-  zoomLevelRef.current = currentZoomLevel;
+  // Menggunakan useRef untuk melacak nilai zoom internal murni secara independen
+  const currentZoomRef = useRef<number>(initialSafeZoom);
+
+  // Jika props externalZoomLevel dari parent berubah, sinkronkan ref dan internal state
+  useEffect(() => {
+    const clamped = clamp(externalZoomLevel, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
+    if (Math.abs(clamped - currentZoomRef.current) > 0.000001) {
+      currentZoomRef.current = clamped;
+      setInternalZoomLevel(clamped);
+    }
+  }, [externalZoomLevel]);
 
   const onZoomChangeRef = useRef(onZoomChange);
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange;
   }, [onZoomChange]);
 
-  useEffect(() => {
-    const clamped = clamp(externalZoomLevel, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
-    // Hanya update jika perubahannya signifikan untuk memutus loop
-    if (Math.abs(clamped - internalZoomLevel) > 0.000001) {
-      setInternalZoomLevel(clamped);
-    }
-  }, [externalZoomLevel, internalZoomLevel]);
+  // Guard mutlak untuk mencegah pengiriman nilai yang sama berulang kali ke parent
+  const lastNotifiedZoomRef = useRef<number | null>(null);
 
   const updateZoomLevel = useCallback((updater: (prev: number) => number) => {
-    const nextZoom = updater(zoomLevelRef.current);
+    const nextZoom = updater(currentZoomRef.current);
     const clampedZoom = clamp(nextZoom, MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL);
 
-    if (onZoomChangeRef.current) {
-      onZoomChangeRef.current(clampedZoom);
-    } else {
+    // GUARD 1: Hanya jalankan jika nilai zoom internal benar-benar berubah
+    if (Math.abs(clampedZoom - currentZoomRef.current) > 0.000001) {
+      currentZoomRef.current = clampedZoom;
       setInternalZoomLevel(clampedZoom);
+
+      // GUARD 2: Mencegah infinite loop dengan Parent Component
+      // Gunakan setTimeout untuk melepas pemanggilan onZoomChange dari siklus render sinkron React saat ini.
+      if (onZoomChangeRef.current) {
+        if (
+          lastNotifiedZoomRef.current === null ||
+          Math.abs(clampedZoom - lastNotifiedZoomRef.current) > 0.000001
+        ) {
+          lastNotifiedZoomRef.current = clampedZoom;
+          // Eksekusi asinkron memutus rantai "Maximum update depth exceeded"
+          setTimeout(() => {
+            onZoomChangeRef.current?.(clampedZoom);
+          }, 0);
+        }
+      }
     }
-  }, []); // Dependency kosongependency kosong karena menggunakan Ref
+  }, []);
+
+  // Alias agar sisa kode di bawahnya tetap dapat membaca nilai zoom saat ini tanpa error
+  const currentZoomLevel = internalZoomLevel;
+  const zoomLevelRef = currentZoomRef;
 
   const prevTargetRef = useRef<any>(null);
   const isAutoZoomingOutRef = useRef(false);
+
+  // Ref untuk rasi bintang guna mencegah re-render loop pada animasi
+  const projectedConstellationsRef = useRef<any[]>([]);
 
   useEffect(() => {
     const latChanged =
       Math.abs(observer.lat - prevLocationRef.current.lat) > 0.0001;
     const lonChanged =
       Math.abs(observer.lon - prevLocationRef.current.lon) > 0.0001;
-
     if (latChanged || lonChanged) {
       if (latChanged) {
         setViewAngle({
@@ -424,44 +450,35 @@ export default function StarCanvas({
           alt: clamp(35 - Math.abs(observer.lat) * 0.3, 15, 45),
         });
       }
-
       if (!activeTarget) {
-        requestAnimationFrame(() => {
-          setViewAngle((current) => ({ ...current }));
-        });
+        requestAnimationFrame(() =>
+          setViewAngle((current) => ({ ...current })),
+        );
       }
-
       prevLocationRef.current = { lat: observer.lat, lon: observer.lon };
     }
-  }, [observer.lat, observer.lon, activeTarget]);
+  }, [observer.lat, observer.lon, activeTarget?.id]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       isAutoZoomingOutRef.current = false;
       if (activeTarget) onClearTarget();
-
-      updateZoomLevel((prev) => {
-        const zoomFactor = e.deltaY > 0 ? 0.92 : 1.08;
-        return prev * zoomFactor;
-      });
+      updateZoomLevel((prev) => (e.deltaY > 0 ? prev * 0.92 : prev * 1.08));
     };
-
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", handleWheel);
-  }, [activeTarget, onClearTarget, updateZoomLevel]);
+    // Hapus updateZoomLevel dari array dependensi karena fungsi tersebut sudah dibungkus useCallback murni
+  }, [activeTarget, onClearTarget]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(
       `(max-width: ${MOBILE_BREAKPOINT - 1}px)`,
     );
-
     const update = (event?: MediaQueryListEvent) =>
       setIsMobile(event?.matches ?? mediaQuery.matches);
-
     update();
     mediaQuery.addEventListener("change", update);
     return () => mediaQuery.removeEventListener("change", update);
@@ -486,16 +503,22 @@ export default function StarCanvas({
         safeObserver as any,
         time,
       );
-
       return { ...star, baseAlt: altitude, baseAz: azimuth };
     });
   }, [safeObserver, stars, time]);
 
   const basePlanets = useMemo(() => {
-    // MODIFIKASI: Urutkan agar satelit digambar lebih dulu (di layer bawah planet induknya)
     return getSolarSystemObjects(time, solarSystem)
-      .sort((a: any, b: any) => (a.parent ? -1 : 1))
       .map((planet: any) => {
+        // Ambil kembali referensi asli JSON agar properti kustom (parent, rPx, color) aman
+        const orig =
+          solarSystem.find((s: any) => String(s.id) === String(planet.id)) ||
+          {};
+        const parentVal = orig.parent || planet.parent;
+        const radiusVal =
+          orig.rPx ?? orig.radiusPx ?? planet.rPx ?? planet.radiusPx ?? 4;
+        const colorVal = orig.color || planet.color || "#ffffff";
+
         const { altitude, azimuth } = equatorialToHorizontal(
           { ra: planet.ra, dec: planet.dec },
           safeObserver as any,
@@ -503,15 +526,17 @@ export default function StarCanvas({
         );
 
         return {
+          ...orig,
           ...planet,
           baseAlt: altitude,
           baseAz: azimuth,
           isPlanet: true,
-          colorStr: planet.color,
-          radiusPx: planet.radiusPx,
-          parent: planet.parent, // Pastikan data parent diteruskan
+          colorStr: colorVal,
+          radiusPx: radiusVal,
+          parent: parentVal,
         };
-      });
+      })
+      .sort((a: any, b: any) => (a.parent ? -1 : 1));
   }, [safeObserver, time, solarSystem]);
 
   const baseDsos = useMemo(() => {
@@ -521,12 +546,7 @@ export default function StarCanvas({
         safeObserver as any,
         time,
       );
-
-      return {
-        ...dso,
-        baseAlt: altitude,
-        baseAz: azimuth,
-      };
+      return { ...dso, baseAlt: altitude, baseAz: azimuth };
     });
   }, [dsos, safeObserver, time]);
 
@@ -537,45 +557,39 @@ export default function StarCanvas({
         safeObserver as any,
         time,
       );
-
       return { ...cloud, baseAlt: altitude, baseAz: azimuth };
     });
   }, [baseMilkyWay, safeObserver, time]);
 
+  // --- SINTAKS DIPERBAIKI (100% BERSIH) ---
   const projectedConstellations = useMemo(() => {
     if (
       !filters.constellations ||
       !constellations ||
       constellations.length === 0
-    ) {
+    )
       return [];
-    }
-
     return constellations.map((con) => {
       const raCenter = con.center[0];
       const decCenter = con.center[1];
-
       const { altitude: cAlt, azimuth: cAz } = equatorialToHorizontal(
         { ra: raCenter, dec: decCenter },
         safeObserver as any,
         time,
       );
-
       const projectedLines =
-        con.lines?.map((segment) => {
-          return segment.map((point) => {
+        con.lines?.map((segment) =>
+          segment.map((point) => {
             const raNode = point[0];
             const decNode = point[1];
-
             const { altitude, azimuth } = equatorialToHorizontal(
               { ra: raNode, dec: decNode },
               safeObserver as any,
               time,
             );
             return { baseAlt: altitude, baseAz: azimuth };
-          });
-        }) ?? [];
-
+          }),
+        ) ?? [];
       return {
         id: con.id,
         name: con.name,
@@ -585,15 +599,17 @@ export default function StarCanvas({
     });
   }, [filters.constellations, constellations, safeObserver, time]);
 
-  const equatorialGridNodes = useMemo(() => {
-    if (!filters.gridEquatorial) {
-      return { raLines: [], decLines: [], equatorNodes: [] };
-    }
+  // Update ref rasi bintang untuk animasi
+  useEffect(() => {
+    projectedConstellationsRef.current = projectedConstellations;
+  }, [projectedConstellations]);
 
+  const equatorialGridNodes = useMemo(() => {
+    if (!filters.gridEquatorial)
+      return { raLines: [], decLines: [], equatorNodes: [] };
     const raLines: Array<Array<{ baseAlt: number; baseAz: number }>> = [];
     const decLines: Array<Array<{ baseAlt: number; baseAz: number }>> = [];
     const equatorNodes: Array<{ baseAlt: number; baseAz: number }> = [];
-
     for (let ra = 0; ra < 360; ra += 15) {
       const lineNodes: Array<{ baseAlt: number; baseAz: number }> = [];
       for (let dec = -85; dec <= 85; dec += 3) {
@@ -606,7 +622,6 @@ export default function StarCanvas({
       }
       raLines.push(lineNodes);
     }
-
     for (let dec = -75; dec <= 75; dec += 15) {
       if (dec === 0) continue;
       const lineNodes: Array<{ baseAlt: number; baseAz: number }> = [];
@@ -620,7 +635,6 @@ export default function StarCanvas({
       }
       decLines.push(lineNodes);
     }
-
     for (let ra = 0; ra <= 360; ra += 3) {
       const { altitude, azimuth } = equatorialToHorizontal(
         { ra: ra % 360, dec: 0 },
@@ -629,17 +643,14 @@ export default function StarCanvas({
       );
       equatorNodes.push({ baseAlt: altitude, baseAz: azimuth });
     }
-
     return { raLines, decLines, equatorNodes };
   }, [filters.gridEquatorial, safeObserver, time]);
 
   useEffect(() => {
     const objectMap = new Map<any, RenderableObject>();
-
     for (const star of baseStars) objectMap.set(star.id, star);
     for (const planet of basePlanets) objectMap.set(planet.id, planet);
     for (const dso of baseDsos) objectMap.set(dso.id, dso);
-
     for (const con of projectedConstellations) {
       objectMap.set(con.id, {
         id: con.id as any,
@@ -647,14 +658,12 @@ export default function StarCanvas({
         baseAz: con.center.baseAz,
       });
     }
-
     latestObjectsRef.current = objectMap;
   }, [baseStars, basePlanets, baseDsos, projectedConstellations]);
 
   useEffect(() => {
     let frameId = 0;
     let isActive = true;
-
     if (prevTargetRef.current !== null && activeTarget === null) {
       isAutoZoomingOutRef.current = true;
     }
@@ -663,10 +672,8 @@ export default function StarCanvas({
     const animate = () => {
       if (!isActive) return;
       let isMoving = false;
-
       if (activeTarget) {
         isAutoZoomingOutRef.current = false;
-
         const isConstellationTarget = typeof activeTarget.id === "string";
         const targetZoomLimit = isConstellationTarget ? 1.8 : 4.5;
 
@@ -683,16 +690,14 @@ export default function StarCanvas({
         let targetAlt: number | null = null;
 
         if (isConstellationTarget) {
-          const tCon = projectedConstellations.find(
+          const tCon = projectedConstellationsRef.current.find(
             (c) => c.id === activeTarget.id,
           );
-
           if (tCon && tCon.lines && tCon.lines.length > 0) {
-            let sumSinAz = 0;
-            let sumCosAz = 0;
-            let sumAlt = 0;
-            let count = 0;
-
+            let sumSinAz = 0,
+              sumCosAz = 0,
+              sumAlt = 0,
+              count = 0;
             for (const segment of tCon.lines) {
               for (const node of segment) {
                 const azRad = node.baseAz * (Math.PI / 180);
@@ -702,14 +707,12 @@ export default function StarCanvas({
                 count++;
               }
             }
-
             if (count > 0) {
               const avgAzRad = Math.atan2(sumSinAz / count, sumCosAz / count);
               targetAz = normalizeAzimuth(avgAzRad * (180 / Math.PI));
               targetAlt = clamp(sumAlt / count, -90, 90);
             }
           }
-
           if (targetAz === null || targetAlt === null) {
             const fallbackObj = latestObjectsRef.current.get(activeTarget.id);
             if (fallbackObj) {
@@ -726,15 +729,11 @@ export default function StarCanvas({
         }
 
         if (targetAz !== null && targetAlt !== null) {
-          const finalAz = targetAz;
-          const finalAlt = targetAlt;
-
           setViewAngle((prev) => {
-            let diffAz = (finalAz - prev.az) % 360;
+            let diffAz = (targetAz! - prev.az) % 360;
             if (diffAz > 180) diffAz -= 360;
             if (diffAz < -180) diffAz += 360;
-
-            const diffAlt = finalAlt - prev.alt;
+            const diffAlt = targetAlt! - prev.alt;
 
             if (Math.abs(diffAz) > 0.05 || Math.abs(diffAlt) > 0.05) {
               isMoving = true;
@@ -744,23 +743,24 @@ export default function StarCanvas({
               };
             }
 
+            // GUARD BAILOUT: Hentikan pembaruan state jika sudah persis di koordinat tujuan
+            if (Math.abs(diffAz) <= 0.00001 && Math.abs(diffAlt) <= 0.00001) {
+              return prev;
+            }
+
             isMoving = true;
-            return {
-              az: finalAz,
-              alt: clamp(finalAlt, -90, 90),
-            };
+            return { az: targetAz!, alt: clamp(targetAlt!, -90, 90) };
           });
         }
       } else if (isAutoZoomingOutRef.current) {
         updateZoomLevel((prev) => {
-          const defaultZoom = 0.85;
-          const diffZ = defaultZoom - prev;
+          const diffZ = 0.85 - prev;
           if (Math.abs(diffZ) > 0.005) {
             isMoving = true;
             return prev + diffZ * 0.06;
           }
           isAutoZoomingOutRef.current = false;
-          return defaultZoom;
+          return 0.85;
         });
       }
 
@@ -770,25 +770,21 @@ export default function StarCanvas({
     };
 
     frameId = requestAnimationFrame(animate);
-
     return () => {
       isActive = false;
       if (frameId) cancelAnimationFrame(frameId);
     };
-  }, [activeTarget, updateZoomLevel]);
+  }, [activeTarget?.id, updateZoomLevel]);
 
   const selectObjectAtPoint = useCallback(
     (clientX: number, clientY: number) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
-
       const mouseX = clientX - rect.left;
       const mouseY = clientY - rect.top;
-
       let foundTarget: any = null;
       const baseRadius = isMobile ? MOBILE_HOVER_RADIUS : DESKTOP_HOVER_RADIUS;
       let minimumDistance = baseRadius;
-
       for (const star of renderedStarsRef.current.values()) {
         const distance = Math.hypot(star.x - mouseX, star.y - mouseY);
         if (distance < minimumDistance) {
@@ -796,7 +792,6 @@ export default function StarCanvas({
           foundTarget = star;
         }
       }
-
       if (filters.constellations) {
         const constellationRadius = baseRadius * 1.5;
         for (const con of renderedConstellationsRef.current.values()) {
@@ -823,7 +818,6 @@ export default function StarCanvas({
           }
         }
       }
-
       if (foundTarget) {
         onSelectTarget(foundTarget);
         onStarHover({
@@ -853,27 +847,21 @@ export default function StarCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) return;
-
     const rect = canvas.getBoundingClientRect();
     const width = rect.width;
     const height = rect.height;
-
     const dpr = Math.min(
       window.devicePixelRatio || 1,
       isMobile ? MOBILE_DPR : DESKTOP_DPR,
     );
-
     const scaledWidth = Math.round(width * dpr);
     const scaledHeight = Math.round(height * dpr);
-
     if (canvas.width !== scaledWidth || canvas.height !== scaledHeight) {
       canvas.width = scaledWidth;
       canvas.height = scaledHeight;
     }
-
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const centerX = width / 2;
@@ -890,19 +878,16 @@ export default function StarCanvas({
     );
     bgGrad.addColorStop(0, "#0b1021");
     bgGrad.addColorStop(1, "#030712");
-
     context.fillStyle = bgGrad;
     context.fillRect(0, 0, width, height);
 
     const sunData = basePlanets.find((p) => p.id === 0);
     const sunAlt = sunData ? sunData.baseAlt : -90;
     let dayIntensity = 0;
-
     if (filters.atmosphere) {
       if (sunAlt > 0) dayIntensity = 1;
       else if (sunAlt > -18) dayIntensity = (sunAlt + 18) / 18;
     }
-
     if (dayIntensity > 0) {
       context.globalAlpha = dayIntensity * 0.6;
       context.fillStyle = "#0ea5e9";
@@ -1025,7 +1010,6 @@ export default function StarCanvas({
     }
 
     const zoomScale = Math.max(1, 1 + (currentZoomLevel - 1) * 0.2);
-    // uiScale mencegah label dan garis menjadi raksasa saat zoom 500.000x
     const uiScale = Math.min(zoomScale, 15);
     const planetScale = 1 + (currentZoomLevel - 1) * 0.8;
 
@@ -1061,19 +1045,16 @@ export default function StarCanvas({
     const projectVisibleObject = (obj: RenderableObject) => {
       const p = proj(obj.baseAlt, obj.baseAz);
       if (!p) return;
-
       const projected: ProjectedStar = {
         ...(obj as ProjectedStar),
         x: p.x,
         y: p.y,
       };
-
       visibleStars.set(obj.id, projected);
       visibleLookup.set(String(obj.id), projected);
       if (projected.name) visibleLookup.set(projected.name, projected);
-      if ((projected as any).messier) {
+      if ((projected as any).messier)
         visibleLookup.set(String((projected as any).messier), projected);
-      }
       if (projected.isPlanet) visiblePlanets.push(projected);
     };
 
@@ -1089,27 +1070,23 @@ export default function StarCanvas({
     for (const planet of visiblePlanets) {
       const parentKey = getObjectKey((planet as any).parent);
       if (!parentKey) continue;
-
-      if (!satellitesByParent.has(parentKey)) {
+      if (!satellitesByParent.has(parentKey))
         satellitesByParent.set(parentKey, []);
-      }
       satellitesByParent.get(parentKey)!.push(planet);
     }
 
     for (const [parentKey, children] of satellitesByParent.entries()) {
       const parentObj = visibleLookup.get(parentKey);
       if (!parentObj) continue;
-
       const layouts = buildSatelliteLayout(
         parentObj,
         children,
         zoomScale,
+        planetScale,
         isMobile,
       );
-
       for (const [id, layout] of layouts.entries()) {
         satelliteLayouts.set(id, layout);
-
         const projected = visibleStars.get(id);
         if (projected) {
           projected.x = layout.x;
@@ -1199,7 +1176,7 @@ export default function StarCanvas({
       color: string,
       lineWidth: number,
       dashPattern: number[] = [],
-      maxSegmentAngleDeg: number = 45,
+      maxSegmentAngleDeg = 45,
       outSegments?: Array<{ x1: number; y1: number; x2: number; y2: number }>,
     ) => {
       context.strokeStyle = color;
@@ -1407,7 +1384,6 @@ export default function StarCanvas({
             labelY = (firstSeg.y1 + firstSeg.y2) / 2;
             hasValidLabel = true;
           }
-
           if (hasValidLabel) {
             visibleConstellations.set(con.id, {
               id: con.id,
@@ -1503,50 +1479,43 @@ export default function StarCanvas({
       if (!star.isPlanet) {
         if (star.mag > CURRENT_MAG_LIMIT) continue;
         const normalizedMagnitude = Math.max(0, (MAX_MAG - star.mag) / MAX_MAG);
-        // Gunakan uiScale agar bintang tidak menutupi layar saat zoom dalam
         const radiusPx =
           Math.max(
             isMobile ? 0.6 : 0.4,
             normalizedMagnitude * (isMobile ? 3.0 : 2.6) + 0.2,
           ) * uiScale;
-        const starColor = getStarColor(star.bv);
         context.globalAlpha = Math.min(
           1,
           Math.max(0.1, (adjustedMagLimit - star.mag) / 5.5),
         );
-        context.fillStyle = starColor;
+        context.fillStyle = getStarColor(star.bv);
         context.beginPath();
         context.arc(star.x, star.y, radiusPx, 0, Math.PI * 2);
         context.fill();
         continue;
       }
 
-      const isSatellite = Boolean((star as any).parent) && star.name !== "Luna";
-      const satelliteLayout = satelliteLayouts.get(star.id);
-
-      // Gunakan koordinat dari layout offset jika tersedia, jika tidak pakai koordinat asli
-      const renderX = satelliteLayout?.x ?? star.x;
-      const renderY = satelliteLayout?.y ?? star.y;
+      const isSatellite = Boolean(star.parent);
+      const layout = satelliteLayouts.get(star.id);
+      const renderX = layout?.x ?? star.x;
+      const renderY = layout?.y ?? star.y;
 
       context.globalAlpha = 1;
-      // Radius planet membesar sesuai zoom fisik (planetScale), bukan uiScale
       const radiusPx = (star.radiusPx || 4) * planetScale;
 
-      // Gambar Leader Line untuk Satelit
-      if (isSatellite && satelliteLayout) {
+      if (isSatellite && layout) {
         context.save();
         context.globalAlpha = 0.3;
         context.strokeStyle = "rgba(255, 255, 255, 0.5)";
         context.lineWidth = 0.5 * uiScale;
         context.beginPath();
-        context.moveTo(satelliteLayout.leaderX1, satelliteLayout.leaderY1);
-        context.lineTo(satelliteLayout.leaderX2, satelliteLayout.leaderY2);
+        context.moveTo(layout.leaderX1, layout.leaderY1);
+        context.lineTo(layout.leaderX2, layout.leaderY2);
         context.stroke();
         context.restore();
       }
 
       if (star.id === 0) {
-        // Rendering Matahari tetap sama menggunakan renderX, renderY
         context.shadowBlur = 50 * uiScale;
         context.shadowColor = "#f59e0b";
         context.fillStyle = "rgba(251, 191, 36, 0.4)";
@@ -1559,8 +1528,13 @@ export default function StarCanvas({
         context.fill();
         context.shadowBlur = 0;
       } else {
-        const drawRadius = isMobile ? radiusPx * 1.2 : radiusPx;
-        context.shadowBlur = (isSatellite ? 7 : 15) * uiScale;
+        const drawRadius = isSatellite
+          ? Math.max(1.5 * uiScale, radiusPx * 0.25)
+          : isMobile
+            ? radiusPx * 1.2
+            : radiusPx;
+
+        context.shadowBlur = (isSatellite ? 6 : 15) * uiScale;
         context.shadowColor = star.colorStr || "#ffffff";
         context.fillStyle = star.colorStr || "#ffffff";
         context.beginPath();
@@ -1568,12 +1542,9 @@ export default function StarCanvas({
         context.fill();
         context.shadowBlur = 0;
 
-        // Label Nama (Hanya muncul jika zoom cukup atau sedang di-track)
         if (!isSatellite && (currentZoomLevel > 3.0 || star.id === 0)) {
-          // Hanya gambar label jika BUKAN satelit
           const labelX = renderX;
-          const labelY = renderY + drawRadius + 12 * uiScale;
-
+          const labelY = renderY + drawRadius + 14 * uiScale;
           context.save();
           context.font = `${10 * uiScale}px monospace`;
           context.textAlign = "center";
@@ -1606,7 +1577,6 @@ export default function StarCanvas({
     context.textAlign = "center";
     context.fillStyle = "rgba(56, 189, 248, 0.8)";
     context.font = `bold ${isMobile ? 10 * zoomScale : 12 * zoomScale}px 'Courier New', monospace`;
-
     for (const point of CARDINAL_POINTS) {
       const p = proj(0, point.az);
       if (p && p.visible)
@@ -1763,7 +1733,6 @@ export default function StarCanvas({
           az: normalizeAzimuth(prev.az - deltaX * sensitivity),
           alt: clamp(prev.alt + deltaY * sensitivity, -90, 90),
         }));
-        return;
       }
     },
     [isMobile, updateZoomLevel, activeTarget, onClearTarget],
@@ -1795,7 +1764,7 @@ export default function StarCanvas({
         initialZoom.current = zoomLevelRef.current;
       }
     },
-    [zoomLevelRef],
+    [],
   );
 
   const handlePointerUp = useCallback(
