@@ -1,0 +1,29 @@
+[
+  {
+    "id": 400001,
+    "name": "ISS (ZARYA)",
+    "type": "Satellite",
+    "color": "#22c55e",
+    "tle1": "1 25544U 98067A   26131.16675675  .00005444  00000-0  10622-3 0  9997",
+    "tle2": "2 25544  51.6310 123.3566 0007470  46.3627 313.7980 15.49181925566014",
+    "description": "Stasiun Luar Angkasa Internasional. Objek buatan manusia terbesar di orbit bumi."
+  },
+  {
+    "id": 400002,
+    "name": "HST (HUBBLE)",
+    "type": "Satellite",
+    "color": "#06b6d4",
+    "tle1": "1 20580U 90037B   26127.97667409  .00005999  00000+0  19110-3 0  9996",
+    "tle2": "2 20580  28.4762 355.2958 0002157  58.4789 301.6018 15.30319964782400",
+    "description": "Teleskop Luar Angkasa Hubble yang legendaris."
+  },
+  {
+    "id": 400003,
+    "name": "CSS (TIANGONG)",
+    "type": "Satellite",
+    "color": "#ef4444",
+    "tle1": "1 48274U 21035A   26132.12345678  .00023456  00000-0  34567-3 0  9999",
+    "tle2": "2 48274  41.4685  345.6789 0003456  23.4567  12.3456 15.61234567123456",
+    "description": "Stasiun Luar Angkasa Tiangong milik Tiongkok."
+  }
+]

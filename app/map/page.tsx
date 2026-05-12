@@ -35,6 +35,42 @@ interface Constellation {
   center: [number, number];
   lines: Array<Array<[number, number]>>;
 }
+
+export interface MinorBodies {
+  id: number;
+  name: string;
+  type: string;
+  ra: number;
+  dec: number;
+  mag: number;
+  color: string;
+  description: string;
+}
+
+export interface Satellites {
+  id: number;
+  name: string;
+  type: string;
+  color: string;
+  tle1: string;
+  tle2: string;
+  description: string;
+}
+
+export interface MeteorShower {
+  id: number;
+  name: string;
+  constellation: string;
+  ra: number;
+  dec: number;
+  peak: string;
+  activeStart: string;
+  activeEnd: string;
+  zhr: number;
+  color: string;
+  description: string;
+}
+
 export interface HoveredStar {
   id: number | string;
   name?: string | null;
@@ -49,6 +85,9 @@ interface MapFilters {
   faintStars: boolean;
   planets: boolean;
   atmosphere: boolean;
+  minorBodies: boolean;
+  satellites: boolean;
+  meteorShowers: boolean;
   gridHorizontal?: boolean;
   gridEquatorial?: boolean;
 }
@@ -74,14 +113,19 @@ function MapContent() {
     atmosphere: searchParams.get("atmosphere") !== "false",
     gridHorizontal: searchParams.get("gridHorizontal") !== "false",
     gridEquatorial: searchParams.get("gridEquatorial") !== "false",
+    minorBodies: searchParams.get("minorBodies") !== "false",
+    satellites: searchParams.get("satellites") !== "false",
+    meteorShowers: searchParams.get("meteorShowers") !== "false",
   };
 
   const [stars, setStars] = useState<Star[]>([]);
   const [dsos, setDsos] = useState<DSO[]>([]);
   const [constellations, setConstellations] = useState<Constellation[]>([]);
   const [solarSystem, setSolarSystem] = useState<any[]>([]);
+  const [minorBodies, setMinorBodies] = useState<MinorBodies[]>([]);
+  const [satellites, setSatellites] = useState<Satellites[]>([]);
+  const [meteorShowers, setMeteorShowers] = useState<MeteorShower[]>([]);
   const [searchResults, setSearchResults] = useState<any[]>([]);
-
   const [hoveredStar, setHoveredStar] = useState<HoveredStar | null>(null);
   const [activeTarget, setActiveTarget] = useState<any | null>(null);
   const [searchQuery, setSearchQuery] = useState(initialQuery);
@@ -170,6 +214,9 @@ function MapContent() {
         setConstellations(data.constellations);
         setDsos(data.dsos);
         setSolarSystem(data.solarSystem);
+        setMinorBodies(data.minorBodies);
+        setSatellites(data.satellites);
+        setMeteorShowers(data.meteorShowers);
         setSearchResults(data.searchResults);
         setError(null);
       } catch (err) {
@@ -231,6 +278,9 @@ function MapContent() {
         dsos={dsos}
         zoomLevel={zoomLevel}
         onZoomChange={setZoomLevel}
+        minorBodies={minorBodies}
+        satellites={satellites}
+        meteorShowers={meteorShowers}
       />
       <MapHUD
         lat={lat}

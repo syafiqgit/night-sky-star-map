@@ -21,11 +21,15 @@ import {
 import TimeScrubber from "./time-scrubber";
 import StarPanel from "./star-panel";
 
+// --- PERBAIKAN 1: Tambahkan minorBodies ke MapFilters ---
 export interface MapFilters {
   constellations: boolean;
   faintStars: boolean;
   planets: boolean;
   atmosphere: boolean;
+  minorBodies: boolean;
+  satellites: boolean;
+  meteorShowers: boolean; // <--- DITAMBAHKAN
   gridHorizontal?: boolean;
   gridEquatorial?: boolean;
 }
@@ -83,13 +87,17 @@ function fmtCoord(value: number, pos: string, neg: string): string {
   return `${Math.abs(value).toFixed(4)}° ${value >= 0 ? pos : neg}`;
 }
 
+// --- PERBAIKAN 2: Tambahkan minorBodies ke FILTER_META ---
 const FILTER_META: Record<keyof MapFilters, { label: string }> = {
   atmosphere: { label: "Atmosphere" },
   constellations: { label: "Constellations" },
   faintStars: { label: "Faint Stars" },
   planets: { label: "Planets" },
+  minorBodies: { label: "Comets & Asteroids" }, // <--- DITAMBAHKAN
   gridHorizontal: { label: "Grid (Alt/Az)" },
   gridEquatorial: { label: "Grid (RA/Dec)" },
+  satellites: { label: "Artificial Satellites" },
+  meteorShowers: { label: "Meteor Showers" },
 };
 
 const Panel = memo(function Panel({
@@ -142,7 +150,6 @@ export default function MapHUD({
   const [mounted, setMounted] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [dismissedTargetId, setDismissedTargetId] = useState<any>(null);
-  console.log("Search result", searchResults);
 
   useEffect(() => {
     setDismissedTargetId(null);
@@ -169,30 +176,23 @@ export default function MapHUD({
     };
   }, [mounted, time]);
 
-  // --- PENYESUAIAN FOV DEGREES (185° sd 0.000278°) ---
   const fovDegrees = useMemo(() => {
     const MAX_FOV_DEG = 185;
     const MIN_FOV_DEG = 0.000278;
 
-    // Menghitung FOV aktual berdasarkan tingkat zoom
     const calculatedFov = (2.5 / zoomLevel) * (180 / Math.PI);
 
-    // Memastikan FOV tidak melebihi atau kurang dari batas limit absolut
     return Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, calculatedFov));
   }, [zoomLevel]);
 
-  // --- PENYESUAIAN PERSENTASE BAR (LOGARITMIK) ---
   const fovPercentage = useMemo(() => {
     const MIN_FOV_DEG = 0.000278;
     const MAX_FOV_DEG = 185;
 
-    // Menggunakan skala logaritmik (Math.log10) agar pergerakan bar indikator
-    // tetap mulus dan proporsional saat melakukan zoom ekstrem dari derajat ke arcsecond.
     const logMax = Math.log10(MAX_FOV_DEG);
     const logMin = Math.log10(MIN_FOV_DEG);
     const logCurrent = Math.log10(fovDegrees);
 
-    // 0% saat pandangan terluas (185°), 100% saat zoom terdalam (0.000278°)
     const percentage = ((logMax - logCurrent) / (logMax - logMin)) * 100;
 
     return Math.max(0, Math.min(100, percentage));
@@ -299,9 +299,9 @@ export default function MapHUD({
                     <div className="truncate text-[12px] font-semibold text-slate-100 group-hover:text-sky-200">
                       {obj.name}
                     </div>
+                    {/* --- PERBAIKAN 3: Format label minorBodies spesifik pada hasil pencarian --- */}
                     <div className="mt-0.5 text-[9px] uppercase tracking-[0.14em] text-slate-600">
                       {obj.messier ? `${obj.messier} · ` : ""}
-
                       {obj.type === "Constellation" ? (
                         <div className="flex items-center gap-1.5 text-sky-400/80">
                           <span className="font-bold border border-sky-500/30 px-1 rounded-xs text-[7px]">
@@ -311,6 +311,20 @@ export default function MapHUD({
                             RA {Math.floor(obj.ra / 15)}h · Dec {obj.dec}°
                           </span>
                         </div>
+                      ) : obj.type === "Satellite" ? (
+                        // --- PENYESUAIAN LABEL SATELLITE ---
+                        <span className="text-emerald-400 font-medium">
+                          Satellite · TLE Orbit
+                        </span>
+                      ) : obj.type === "Comet" || obj.type === "Asteroid" ? (
+                        <span className="text-teal-400/80">
+                          {obj.type}
+                          {typeof obj.mag === "number"
+                            ? ` · mag ${obj.mag.toFixed(2)}`
+                            : ""}
+                        </span>
+                      ) : obj.type === "MeteorShower" ? (
+                        <span className="text-yellow-400">Radiant</span>
                       ) : typeof obj.mag === "number" ? (
                         `mag ${obj.mag.toFixed(2)}`
                       ) : (
@@ -465,7 +479,6 @@ export default function MapHUD({
               <div className="flex flex-col items-end">
                 <div className="flex items-baseline gap-1">
                   <span className="text-[10px] font-bold tabular-nums text-slate-200">
-                    {/* Mengatur jumlah digit desimal secara dinamis agar presisi tinggi terlihat */}
                     {fovDegrees < 0.01
                       ? fovDegrees.toFixed(6)
                       : fovDegrees < 1

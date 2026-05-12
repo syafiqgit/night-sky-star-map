@@ -1,0 +1,41 @@
+[
+  {
+    "id": 500001,
+    "name": "Perseids",
+    "constellation": "Perseus",
+    "ra": 3.1,
+    "dec": 58.0,
+    "peak": "08-12",
+    "activeStart": "07-17",
+    "activeEnd": "08-24",
+    "zhr": 100,
+    "color": "#fef08a",
+    "description": "Hujan meteor paling populer, berasal dari komet Swift-Tuttle."
+  },
+  {
+    "id": 500002,
+    "name": "Geminids",
+    "constellation": "Gemini",
+    "ra": 7.47,
+    "dec": 33.0,
+    "peak": "12-14",
+    "activeStart": "12-04",
+    "activeEnd": "12-17",
+    "zhr": 120,
+    "color": "#ffffff",
+    "description": "Hujan meteor yang sangat terang dan intens, berasal dari asteroid 3200 Phaethon."
+  },
+  {
+    "id": 500003,
+    "name": "Lyrids",
+    "constellation": "Lyra",
+    "ra": 18.1,
+    "dec": 34.0,
+    "peak": "04-22",
+    "activeStart": "04-16",
+    "activeEnd": "04-25",
+    "zhr": 18,
+    "color": "#bae6fd",
+    "description": "Hujan meteor tertua yang tercatat, berasal dari komet C/1861 G1 Thatcher."
+  }
+]
