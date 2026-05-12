@@ -110,7 +110,7 @@ const Panel = memo(function Panel({
   return (
     <div
       className={[
-        "rounded-2xl border border-white/10 bg-black/50 shadow-[0_8px_32px_rgba(0,0,0,0.4)] backdrop-blur-2xl",
+        "rounded-2xl border border-white/15 bg-black/40 shadow-[0_12px_48px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-transform hover:scale-[1.02]",
         className,
       ].join(" ")}
     >
@@ -127,7 +127,9 @@ const Label = memo(function Label({ children }: { children: React.ReactNode }) {
   );
 });
 
-const Divider = () => <div className="mx-4 h-px bg-white/5" />;
+const Divider = () => (
+  <div className="mx-4 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+);
 
 export default function MapHUD({
   lat,
@@ -257,7 +259,7 @@ export default function MapHUD({
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search stars, planets, nebula..."
-              className="h-12 w-full bg-transparent pl-11 pr-10 text-[12px] text-white outline-none placeholder:text-slate-600"
+              className="h-12 w-full rounded-md bg-black/30 pl-11 pr-10 text-[12px] text-white outline-none placeholder:text-slate-600 focus:bg-black/50 focus:ring-2 focus:ring-sky-400/40 transition-colors"
             />
             {searchQuery && (
               <button
@@ -388,7 +390,7 @@ export default function MapHUD({
         </button>
 
         {showFilters && (
-          <Panel className="w-52 overflow-hidden">
+          <Panel className="w-52 overflow-hidden z-50">
             <div className="flex items-center gap-2 border-b border-white/5 px-3.5 py-2.5">
               <Layers3 size={12} className="text-sky-400" />
               <Label>Display</Label>
@@ -403,10 +405,10 @@ export default function MapHUD({
                       type="button"
                       onClick={() => onToggleFilter(key)}
                       className={[
-                        "group flex w-full items-center justify-between rounded-xl border px-3 py-2 transition-all duration-150",
+                        "group flex w-full items-center justify-between rounded-xl border px-3 py-2 transition-colors duration-200",
                         on
-                          ? "border-sky-500/25 bg-sky-500/10 text-white"
-                          : "border-white/5 bg-white/3 text-slate-500 hover:border-white/10 hover:text-slate-300",
+                          ? "border-sky-500/30 bg-sky-500/15 text-white shadow-[0_4px_12px_rgba(56,189,248,0.2)]"
+                          : "border-white/10 bg-white/5 text-slate-400 hover:border-white/30 hover:text-slate-200",
                       ].join(" ")}
                     >
                       <span className="text-[11px] font-medium">
@@ -414,10 +416,10 @@ export default function MapHUD({
                       </span>
                       <div
                         className={[
-                          "flex h-5 w-5 items-center justify-center rounded-full transition-all",
+                          "flex h-5 w-5 items-center justify-center rounded-full transition-colors",
                           on
-                            ? "bg-sky-500/20 text-sky-300"
-                            : "bg-white/5 text-slate-600",
+                            ? "bg-sky-500/30 text-sky-200"
+                            : "bg-white/8 text-slate-600",
                         ].join(" ")}
                       >
                         {on ? <Eye size={10} /> : <EyeOff size={10} />}
@@ -436,8 +438,8 @@ export default function MapHUD({
         <div className="flex items-end justify-between gap-3">
           <Panel className="px-4 py-3">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/10 ring-1 ring-sky-400/20">
-                <Clock3 size={13} className="text-sky-400" />
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/15 ring-1 ring-sky-400/30">
+                <Clock3 size={13} className="text-sky-300" />
               </div>
               <div>
                 <Label>Local Time</Label>
@@ -445,11 +447,11 @@ export default function MapHUD({
                   <span className="text-[22px] font-black leading-none tracking-tighter tabular-nums text-white sm:text-[26px]">
                     {fmt.time}
                   </span>
-                  <span className="rounded border border-sky-400/15 bg-sky-400/10 px-1.5 py-0.5 text-[7px] font-semibold uppercase tracking-[0.16em] text-sky-300">
+                  <span className="rounded border border-sky-400/20 bg-sky-400/15 px-1.5 py-0.5 text-[7px] font-semibold uppercase tracking-[0.16em] text-sky-200">
                     {fmt.offset}
                   </span>
                 </div>
-                <div className="mt-0.5 text-[8px] text-slate-600">
+                <div className="mt-0.5 text-[8px] text-slate-500">
                   {fmt.date}
                 </div>
               </div>
@@ -462,14 +464,14 @@ export default function MapHUD({
             <button
               type="button"
               onClick={onResetView}
-              className="group flex h-10 items-center gap-3 rounded-2xl border border-white/10 bg-black/50 px-4 text-slate-400 shadow-[0_8px_32px_rgba(0,0,0,0.4)] backdrop-blur-2xl transition-all hover:border-sky-500/30 hover:text-sky-300 hover:shadow-[0_0_24px_rgba(56,189,248,0.15)]"
+              className="group flex h-10 items-center gap-3 rounded-2xl border border-white/15 bg-black/40 px-4 text-slate-300 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-xl transition-all hover:border-sky-500/30 hover:text-sky-300 hover:shadow-[0_0_24px_rgba(56,189,248,0.2)]"
             >
               <RotateCcw
                 size={14}
                 className="transition-transform group-hover:-rotate-90"
               />
               <span className="text-[9px] font-bold uppercase tracking-[0.2em]">
-                Reset Perspective
+                Reset View
               </span>
             </button>
 
