@@ -663,19 +663,41 @@ export default function StarCanvas({
     });
   }, [filters.minorBodies, minorBodies, safeObserver, time]);
 
+  /* ---------------------------------------------------------------- */
+  /* ✨ PERBAIKAN: Pre-parsing TLE secara aman & terpisah             */
+  /* ---------------------------------------------------------------- */
+  const cachedSatRecs = useMemo(() => {
+    if (!satellites || !satellites.length) return [];
+    return satellites.map((sat) => {
+      try {
+        // Mencegah error parser akibat spasi kosong di awal/akhir string
+        const t1 = sat.tle1?.trim();
+        const t2 = sat.tle2?.trim();
+        if (t1 && t2) {
+          const satrec = satellite.twoline2satrec(t1, t2);
+          return { sat, satrec };
+        }
+      } catch (e) {
+        // Melewati TLE yang korup/kadaluarsa tanpa mematikan proses render
+      }
+      return { sat, satrec: null };
+    });
+  }, [satellites]);
+
   const baseSatellites = useMemo(() => {
-    if (!filters.satellites || !satellites.length) return [];
+    if (!filters.satellites || !cachedSatRecs.length) return [];
     const observerGd = {
       longitude: observer.lon * (Math.PI / 180),
       latitude: observer.lat * (Math.PI / 180),
       height: 0.05,
     };
-    return satellites.map((sat) => {
+    const gmst = satellite.gstime(time);
+
+    return cachedSatRecs.map(({ sat, satrec }) => {
+      if (!satrec) return { ...sat, baseAlt: -999, baseAz: 0 };
       try {
-        const satrec = satellite.twoline2satrec(sat.tle1, sat.tle2);
         const pv = satellite.propagate(satrec, time);
-        if (typeof pv.position === "object") {
-          const gmst = satellite.gstime(time);
+        if (pv && typeof pv.position === "object" && pv.position !== null) {
           const ecf = satellite.eciToEcf(pv.position as any, gmst);
           const look = satellite.ecfToLookAngles(observerGd, ecf);
           return {
@@ -687,7 +709,7 @@ export default function StarCanvas({
       } catch {}
       return { ...sat, baseAlt: -999, baseAz: 0 };
     });
-  }, [filters.satellites, satellites, observer.lat, observer.lon, time]);
+  }, [filters.satellites, cachedSatRecs, observer.lat, observer.lon, time]);
 
   const baseMeteorShowers = useMemo(() => {
     if (!filters.meteorShowers || !meteorShowers) return [];
@@ -1421,35 +1443,46 @@ export default function StarCanvas({
         ctx.restore();
       }
 
+      /* ---------------------------------------------------------------- */
+      /* ✨ PERBAIKAN RENDER SATELIT: Tampil Walau di Bawah Ufuk          */
+      /* ---------------------------------------------------------------- */
       if (filters.satellites && baseSatellites.length > 0) {
         ctx.save();
         const pulse = Math.sin(Date.now() / 150) * 0.3 + 0.7;
         for (const sat of baseSatellites) {
-          const tracked = activeTargetRef.current?.id === sat.id;
-          if (isNaN(sat.baseAlt) || (sat.baseAlt < 0 && !tracked)) continue;
+          if (isNaN(sat.baseAlt)) continue;
           const p = proj(sat.baseAlt, sat.baseAz);
           if (!p) continue;
+
+          // Mengisi koordinat piksel layar agar bisa selalu terdeteksi mouse/touch
           visibleSatellites.set(sat.id, { ...sat, x: p.x, y: p.y });
-          if (sat.baseAlt < 0) continue;
+
+          const isBelowHorizon = sat.baseAlt < 0;
+          const tracked = activeTargetRef.current?.id === sat.id;
+
           ctx.save();
           ctx.translate(p.x, p.y);
           const sc = sat.color || "#10b981";
-          ctx.shadowBlur = 10 * zoomScale;
+          ctx.shadowBlur = isBelowHorizon ? 0 : 10 * zoomScale;
           ctx.shadowColor = sc;
           ctx.strokeStyle = sc;
           ctx.lineWidth = 1.2;
-          ctx.globalAlpha = 0.6 * pulse;
+
+          // Efek visual redup transparan jika satelit sedang berada di bawah ufuk lokal
+          ctx.globalAlpha = isBelowHorizon && !tracked ? 0.25 : 0.6 * pulse;
           const rd = 8 * zoomScale;
           ctx.strokeRect(-rd / 2, -rd / 2, rd, rd);
+
           ctx.fillStyle = "#ffffff";
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = isBelowHorizon && !tracked ? 0.4 : 1;
           ctx.beginPath();
           ctx.arc(0, 0, 1.8 * zoomScale, 0, Math.PI * 2);
           ctx.fill();
+
           ctx.fillStyle = sc;
           ctx.font = `bold ${9 * uiScale}px monospace`;
           ctx.textAlign = "center";
-          ctx.shadowBlur = 4;
+          ctx.shadowBlur = isBelowHorizon ? 0 : 4;
           ctx.shadowColor = "black";
           ctx.fillText(sat.name, 0, -rd - 4 * uiScale);
           ctx.restore();
