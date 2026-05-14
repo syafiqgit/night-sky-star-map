@@ -1,22 +1,14 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  Suspense,
-  useRef,
-} from "react";
+import { useCallback, useEffect, useState, Suspense, useRef } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import StarCanvas, { FOVConfig } from "@/components/map/star-canvas";
 import MapHUD from "@/components/map/map-hud";
 import {
   parseCoordinate,
   isValidLatitude,
   isValidLongitude,
 } from "@/lib/utils";
-import React from "react";
+import StarCanvas, { FOVConfig } from "@/components/map/star-canvas";
 
 // --- Interfaces ---
 
@@ -379,9 +371,17 @@ function MapContent() {
     searchResults: [],
   };
 
+  console.log(
+    "total stars:",
+    skyData.stars?.length,
+    "mag range:",
+    Math.min(...skyData.stars.map((s) => s.mag)).toFixed(1),
+    "to",
+    Math.max(...skyData.stars.map((s) => s.mag)).toFixed(1),
+  );
+
   return (
-    <main className="relative h-full w-full overflow-hidden bg-black">
-      {/* KANVAS RENDERING UTAMA */}
+    <main className="relative h-screen w-full overflow-hidden bg-black">
       <StarCanvas
         key={`canvas-${resetKey}`}
         stars={skyData.stars}
@@ -402,13 +402,10 @@ function MapContent() {
         satellites={skyData.satellites}
         meteorShowers={skyData.meteorShowers}
       />
-
-      {/* OVERLAY HUD INTERAKTIF */}
       <MapHUD
         lat={lat}
         lon={lon}
         time={time}
-        // ✨ Filters sekarang membawa state bortleScale ke MapHUD untuk Slider
         filters={{ ...filters, fovConfig }}
         onToggleFilter={toggleFilter}
         onUpdateFovConfig={handleUpdateFov}
@@ -426,8 +423,6 @@ function MapContent() {
         onTeleportObserver={handleTeleportObserver}
         solarSystemObjects={skyData.solarSystem}
       />
-
-      {/* INDIKATOR BACKGROUND SYNCING */}
       {isBackgroundFetching && (
         <div className="absolute top-4 right-32 z-50 pointer-events-none flex items-center gap-1.5 bg-black/40 border border-white/10 px-2 py-1 rounded-full backdrop-blur-md animate-fadeIn">
           <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-ping" />
@@ -436,7 +431,6 @@ function MapContent() {
           </span>
         </div>
       )}
-
       {error && (
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 bg-red-500/20 border border-red-500/50 px-4 py-2 rounded-xl backdrop-blur-md text-[10px] text-red-300 font-mono">
           ERROR: {error}

@@ -11,6 +11,9 @@
   "dependencies": {
     "@react-three/drei": "^10.7.7",
     "@tanstack/react-query": "^5.100.9",
+    "@use-gesture/react": "^10.3.1",
+    "astronomy-engine": "^2.1.19",
+    "chroma-js": "^3.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "csv-parser": "^3.2.0",
@@ -18,6 +21,7 @@
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",
     "next": "16.2.4",
+    "pixi.js": "^8.18.1",
     "radix-ui": "^1.4.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -29,6 +33,8 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/chroma-js": "^3.1.2",
+    "@types/d3-geo": "^3.1.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

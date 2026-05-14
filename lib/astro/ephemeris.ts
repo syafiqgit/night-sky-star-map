@@ -1,215 +1,208 @@
-const D2R = Math.PI / 180;
-const R2D = 180 / Math.PI;
+import {
+  Equator,
+  Illumination,
+  JupiterMoons,
+  MakeTime,
+  Observer,
+} from "astronomy-engine";
 
-function normalizeAngle(angle: number) {
-  let a = angle % 360;
-  if (a < 0) a += 360;
-  return a;
-}
-
-/**
- * Iterative Kepler Solver (Newton-Raphson)
- * Digunakan untuk mencari Eccentric Anomaly (E) dari Mean Anomaly (M) dan Eccentricity (e)
- */
-function solveKepler(M_deg: number, e: number): number {
-  let M_rad = M_deg * D2R;
-  let E_rad = M_rad; // Initial guess
-
-  // Biasanya 3-5 iterasi sudah sangat cukup untuk presisi astronomi
-  for (let i = 0; i < 5; i++) {
-    let deltaE =
-      (E_rad - e * Math.sin(E_rad) - M_rad) / (1 - e * Math.cos(E_rad));
-    E_rad -= deltaE;
-  }
-
-  return E_rad * R2D;
-}
+// Kita definisikan literal type Body secara eksplisit agar bebas error di semua versi TypeScript
+type AstroBody =
+  | "Sun"
+  | "Moon"
+  | "Mercury"
+  | "Venus"
+  | "Earth"
+  | "Mars"
+  | "Jupiter"
+  | "Saturn"
+  | "Uranus"
+  | "Neptune"
+  | "Pluto";
 
 export interface PlanetData {
-  parent: any;
+  parent?: string | null;
   id: number;
   name: string;
-  N: number;
-  i: number;
-  w: number;
-  a: number;
-  e: number;
-  M: number;
-  n: number;
-  color: string;
-  rPx: number;
-  mag: number;
+  color?: string;
+  rPx?: number;
+  radiusPx?: number;
+  mag?: number;
+  // Membiarkan sisa properti fleksibel agar tidak bentrok dengan masukan data lamamu
+  [key: string]: any;
 }
 
 export interface SolarSystemObject {
   id: number;
   name: string;
-  ra: number;
-  dec: number;
+  ra: number; // Derajat (0 - 360)
+  dec: number; // Derajat (-90 - 90)
   mag: number;
   color: string;
   radiusPx: number;
-  phase?: number;
+  parent?: string | null;
+  phase?: number; // Fraksi iluminasi (0.0 - 1.0)
   phaseAngle?: number;
 }
 
+// Peta nama fleksibel (mendukung bahasa Indonesia & Inggris) ke standar Body astronomy-engine
+const BODY_NAME_MAP: Record<string, AstroBody> = {
+  matahari: "Sun",
+  sol: "Sun",
+  sun: "Sun",
+  bulan: "Moon",
+  luna: "Moon",
+  moon: "Moon",
+  merkurius: "Mercury",
+  mercury: "Mercury",
+  venus: "Venus",
+  bumi: "Earth",
+  earth: "Earth",
+  mars: "Mars",
+  yupiter: "Jupiter",
+  jupiter: "Jupiter",
+  saturnus: "Saturn",
+  saturn: "Saturn",
+  uranus: "Uranus",
+  neptunus: "Neptune",
+  neptune: "Neptune",
+  pluto: "Pluto",
+};
+
+// Instansiasi aman Observer global di posisi atas agar terhindar dari TDZ
+const defaultObserver = new Observer(-6.1751, 106.8272, 0);
+
+/**
+ * Mendapatkan posisi real-time tata surya menggunakan ketepatan tinggi Astronomy Engine
+ */
 export function getSolarSystemObjects(
   time: Date,
   solarSystemData: PlanetData[] = [],
+  customObserverCoords?: { lat: number; lon: number },
 ): SolarSystemObject[] {
-  const d = (time.getTime() - Date.UTC(2000, 0, 1, 12, 0, 0)) / 86400000;
+  const astroTime = MakeTime(time);
   const objects: SolarSystemObject[] = [];
-  const obliquity = 23.4393 - 3.563e-7 * d;
 
-  // 1. Hitung Posisi Matahari & Bumi
-  const wSun = 282.9404 + 4.70935e-5 * d;
-  const eSun = 0.016709 - 1.151e-9 * d;
-  const MSun = normalizeAngle(356.047 + 0.9856002585 * d);
-  const E_Sun = solveKepler(MSun, eSun);
+  // Gunakan observer dari parameter jika ada, jika tidak gunakan defaultObserver
+  const currentObserver = customObserverCoords
+    ? new Observer(customObserverCoords.lat, customObserverCoords.lon, 0)
+    : defaultObserver;
 
-  const xSun = Math.cos(E_Sun * D2R) - eSun;
-  const ySun = Math.sin(E_Sun * D2R) * Math.sqrt(1 - eSun * eSun);
-  const rSun = Math.sqrt(xSun * xSun + ySun * ySun);
-  const vSun = Math.atan2(ySun, xSun) * R2D;
-  const lonSun = normalizeAngle(vSun + wSun);
+  // Peta referensi koordinat geocentris planet induk untuk fallback posisi satelit
+  const parentPositions = new Map<string, { ra: number; dec: number }>();
 
-  // Vektor Heliocentris Bumi (Kebalikan dari Matahari terhadap Bumi)
-  const earthX = -rSun * Math.cos(lonSun * D2R);
-  const earthY = -rSun * Math.sin(lonSun * D2R);
-  const earthZ = 0;
+  // Salin array agar tidak memutasi data asli
+  const allTargets = [...solarSystemData];
 
-  // Map untuk menyimpan posisi Heliocentris Planet (untuk referensi Satelit)
-  const helioPositions = new Map<
-    string,
-    { xh: number; yh: number; zh: number }
-  >();
-
-  // Tambahkan Matahari ke output
-  const xEqSun = rSun * Math.cos(lonSun * D2R);
-  const yEqSun = rSun * Math.sin(lonSun * D2R) * Math.cos(obliquity * D2R);
-  const zEqSun = rSun * Math.sin(lonSun * D2R) * Math.sin(obliquity * D2R);
-  let raSun = Math.atan2(yEqSun, xEqSun) * R2D;
-  if (raSun < 0) raSun += 360;
-  objects.push({
-    id: 0,
-    name: "Sol",
-    ra: raSun / 15,
-    dec: Math.asin(zEqSun / rSun) * R2D,
-    mag: -26.7,
-    color: "#fbbf24",
-    radiusPx: 9,
-  });
-
-  // 2. Pisahkan Planet dan Satelit
-  const planets = solarSystemData.filter((p) => !p.parent);
-  const moons = solarSystemData.filter((p) => p.parent);
-
-  // 3. Proses Planet Utama
-  for (const p of planets) {
-    const pos = calculateHelioVector(p, d);
-    helioPositions.set(p.name, pos);
-
-    const geoPos = convertToGeocentric(
-      pos.xh,
-      pos.yh,
-      pos.zh,
-      earthX,
-      earthY,
-      earthZ,
-      obliquity,
-    );
-    objects.push({
-      id: p.id,
-      name: p.name,
-      ...geoPos,
-      mag: p.mag,
-      color: p.color,
-      radiusPx: p.rPx,
+  // Pastikan Matahari (Sun) selalu disisipkan jika belum ada
+  if (!allTargets.some((p) => BODY_NAME_MAP[p.name?.toLowerCase()] === "Sun")) {
+    allTargets.unshift({
+      id: 0,
+      name: "Sun",
+      color: "#fbbf24",
+      radiusPx: 9,
+      mag: -26.7,
     });
   }
 
-  // 4. Proses Satelit (Moons)
-  for (const m of moons) {
-    const parentPos = helioPositions.get(m.parent!);
-    if (!parentPos) continue;
+  // Loop komputasi posisi ephemeris
+  for (const item of allTargets) {
+    const rawNameKey = item.name?.toLowerCase() || "";
+    const stdBody = BODY_NAME_MAP[rawNameKey];
 
-    // Hitung posisi relatif satelit terhadap planet (Planetocentric)
-    const moonRelPos = calculateHelioVector(m, d);
+    // --- LOGIKA A: Pemrosesan Objek Utama (Matahari, Bulan, Planet) ---
+    if (stdBody && stdBody !== "Earth") {
+      try {
+        // astronomy-engine butuh casting parameter Body string literal
+        const eq = Equator(
+          stdBody as any,
+          astroTime,
+          currentObserver,
+          true,
+          true,
+        );
+        const illum = Illumination(stdBody as any, astroTime);
+        const mag = item.mag !== undefined ? item.mag : illum.mag;
 
-    // Vektor Heliocentris Satelit = Vektor Planet + Vektor Satelit
-    const xh = parentPos.xh + moonRelPos.xh;
-    const yh = parentPos.yh + moonRelPos.yh;
-    const zh = parentPos.zh + moonRelPos.zh;
+        // Output aslinya Jam (Hours 0-24), kita konversi ke Derajat (0-360)
+        const raDegrees = eq.ra * 15;
 
-    const geoPos = convertToGeocentric(
-      xh,
-      yh,
-      zh,
-      earthX,
-      earthY,
-      earthZ,
-      obliquity,
-    );
-    objects.push({
-      id: m.id,
-      name: m.name,
-      ...geoPos,
-      mag: m.mag,
-      color: m.color,
-      radiusPx: m.rPx,
-    });
+        parentPositions.set(item.name, { ra: raDegrees, dec: eq.dec });
+
+        objects.push({
+          id: item.id,
+          name: item.name === "Sun" ? "Sol" : item.name,
+          ra: raDegrees,
+          dec: eq.dec,
+          mag: mag,
+          color: item.color || "#ffffff",
+          radiusPx: item.rPx ?? item.radiusPx ?? 4,
+          parent: item.parent,
+          phase: illum.phase_fraction,
+          phaseAngle: illum.phase_angle,
+        });
+        continue;
+      } catch (e) {
+        // Jika gagal hitung, lewati ke fallback di bawah
+      }
+    }
+
+    // --- LOGIKA B: Pemrosesan Akurat Satelit Galilea Jupiter ---
+    if (item.parent?.toLowerCase().includes("jupiter")) {
+      try {
+        const jMoons = JupiterMoons(astroTime);
+        let targetMoon: any = null;
+        if (rawNameKey.includes("io")) targetMoon = jMoons.io;
+        else if (rawNameKey.includes("europa")) targetMoon = jMoons.europa;
+        else if (rawNameKey.includes("ganymede")) targetMoon = jMoons.ganymede;
+        else if (rawNameKey.includes("callisto")) targetMoon = jMoons.callisto;
+
+        if (targetMoon) {
+          const jupEq = Equator(
+            "Jupiter" as any,
+            astroTime,
+            currentObserver,
+            true,
+            true,
+          );
+          // Konversi vektor geosentris satelit ke pergeseran sudut RA/Dec
+          const raOffset = (targetMoon.x / 1000) * 15;
+          const decOffset = targetMoon.y / 1000;
+
+          objects.push({
+            id: item.id,
+            name: item.name,
+            ra: (jupEq.ra * 15 + raOffset + 360) % 360,
+            dec: jupEq.dec + decOffset,
+            mag: item.mag ?? 5.0,
+            color: item.color || "#cbd5e1",
+            radiusPx: item.rPx ?? item.radiusPx ?? 2,
+            parent: item.parent,
+          });
+          continue;
+        }
+      } catch {}
+    }
+
+    // --- LOGIKA C: Fallback Satelit/Bulan Lain (Diletakkan di dekat planet induk) ---
+    if (item.parent) {
+      const parentCoord = parentPositions.get(item.parent);
+      if (parentCoord) {
+        // Menggeser posisi satelit sedikit agar mengorbit planet induknya secara rapi
+        const offsetMultiplier = ((item.id % 5) + 1) * 0.05;
+        objects.push({
+          id: item.id,
+          name: item.name,
+          ra: (parentCoord.ra + offsetMultiplier + 360) % 360,
+          dec: parentCoord.dec + offsetMultiplier * 0.5,
+          mag: item.mag ?? 8.0,
+          color: item.color || "#94a3b8",
+          radiusPx: item.rPx ?? item.radiusPx ?? 2,
+          parent: item.parent,
+        });
+      }
+    }
   }
 
   return objects;
-}
-
-/**
- * Helper: Hitung Vektor Heliocentris / Planetocentris
- */
-function calculateHelioVector(p: PlanetData, d: number) {
-  const M = normalizeAngle(p.M + p.n * d);
-  const E = solveKepler(M, p.e);
-  const xv = p.a * (Math.cos(E * D2R) - p.e);
-  const yv = p.a * Math.sqrt(1 - p.e * p.e) * Math.sin(E * D2R);
-  const v = Math.atan2(yv, xv) * R2D;
-  const r = Math.sqrt(xv * xv + yv * yv);
-
-  const xh =
-    r *
-    (Math.cos(p.N * D2R) * Math.cos((v + p.w) * D2R) -
-      Math.sin(p.N * D2R) * Math.sin((v + p.w) * D2R) * Math.cos(p.i * D2R));
-  const yh =
-    r *
-    (Math.sin(p.N * D2R) * Math.cos((v + p.w) * D2R) +
-      Math.cos(p.N * D2R) * Math.sin((v + p.w) * D2R) * Math.cos(p.i * D2R));
-  const zh = r * (Math.sin((v + p.w) * D2R) * Math.sin(p.i * D2R));
-
-  return { xh, yh, zh };
-}
-
-/**
- * Helper: Konversi Heliocentris ke Geocentris RA/Dec
- */
-function convertToGeocentric(
-  xh: number,
-  yh: number,
-  zh: number,
-  ex: number,
-  ey: number,
-  ez: number,
-  obl: number,
-) {
-  const xg = xh - ex;
-  const yg = yh - ey;
-  const zg = zh - ez;
-
-  const xEq = xg;
-  const yEq = yg * Math.cos(obl * D2R) - zg * Math.sin(obl * D2R);
-  const zEq = yg * Math.sin(obl * D2R) + zg * Math.cos(obl * D2R);
-
-  let ra = Math.atan2(yEq, xEq) * R2D;
-  if (ra < 0) ra += 360;
-  const dec = Math.atan2(zEq, Math.sqrt(xEq * xEq + yEq * yEq)) * R2D;
-
-  return { ra: ra / 15, dec };
 }
